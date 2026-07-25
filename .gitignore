@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+
+# run artifacts — never committed, recreated on first run
+artifacts/*.db
+artifacts/checkpoints/
+mlruns/

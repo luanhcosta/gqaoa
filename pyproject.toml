@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gqaoa"
+version = "0.1.0"
+description = "GQAOA: a learned transformer sampler over QAOA circuit parameters for portfolio optimization"
+requires-python = ">=3.10"
+dependencies = [
+    "pennylane>=0.40.0",
+    "torch",
+    "transformers==5.5.0",
+    "scipy>=1.13.0",
+    "cvxpy==1.8.2",
+    "pandas>=2.0.0",
+    "numpy>=1.26.0",
+    "networkx>=3.0",
+    "mlflow>=2.15.0",  # every strategy's run_job() wraps its body in mlflow.start_run(), not optional
+]
+
+[project.optional-dependencies]
+gpu = ["pennylane-lightning[gpu]"]
+hpo = ["optuna>=3.6.0"]  # only needed by gqaoa-hpo / gqaoa.experiments.hpo
+dev = ["pytest>=8.0", "pytest-cov", "ruff"]
+
+[project.scripts]
+gqaoa-run = "gqaoa.cli.run_gqaoa:main"
+gqaoa-hpo = "gqaoa.cli.run_hpo:main"
+gqaoa-stability-check = "gqaoa.cli.run_stability_check:main"
+gqaoa-bracket = "gqaoa.cli.run_bracket:main"
+gqaoa-stability-bracket = "gqaoa.cli.run_stability_bracket:main"
+gqaoa-benchmark-gd = "gqaoa.cli.run_benchmark_gd:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: long-running end-to-end smoke tests; skipped by default",
+    "gpu: requires a real NVIDIA GPU + lightning.gpu; skipped by default",
+]
+addopts = "-m 'not slow and not gpu'"
