@@ -29,6 +29,13 @@ Start the MLflow UI (tracking DB lives at `artifacts/mlflow.db`, created on firs
 mlflow ui --backend-store-uri sqlite:///artifacts/mlflow.db --allowed-hosts '*' --cors-allowed-origins '*'
 ```
 
+> **Don't delete `artifacts/mlflow.db`/`artifacts/optuna.db` while `mlflow ui` is running.**
+> The server keeps the file open; deleting it out from under a running server leaves the
+> server holding a handle to an orphaned file, and a training run started afterward can
+> collide with it — this is exactly what caused an `attempt to write a readonly database`
+> crash partway through a real run. If you need to reset the tracking DB, stop the server
+> first (`pkill -f "mlflow ui"`), delete the file, then restart the server.
+
 | Experiment | MLflow experiment name |
 |---|---|
 | Stability check (main experiment) | `gqaoa-stability` |
@@ -64,27 +71,27 @@ pip install -e ".[dev]"          # no need for the gpu extra at all
   neural net at all, so `--limit-qpu-call` directly controls the cost and CPU is
   fine even at the full 1000-call budget (e.g. `gqaoa-benchmark-gd --device-name
   default.qubit --n-runs 3` runs in seconds per run).
+- **`gqaoa-stability-check`, `gqaoa-bracket`, `gqaoa-stability-bracket`, `gqaoa-hpo`**,
+  *if you also shrink the model* — all four use `BEST_KNOWN_CONFIG`'s "full" GPT2
+  architecture (`n_embd=768, n_layer=12, n_head=12`) by default, and on CPU the
+  transformer forward/backward pass dominates cost, not the QAOA circuit, so
+  lowering `--limit-qpu-call` alone does **not** help (confirmed:
+  `gqaoa-stability-check --limit-qpu-call 5` alone didn't finish within a
+  minute). Each of the four now also accepts `--vocab-size`/`--n-embd`/
+  `--n-layer`/`--n-head` overrides (default: unchanged, so full-budget GPU runs
+  are unaffected) — e.g. `gqaoa-stability-check --device-name default.qubit
+  --n-layer 1 --vocab-size 4 --n-runs 1 --limit-qpu-call 5` completes in ~8s.
+  `gqaoa-hpo` additionally exposes `--limit-epochs`/`--limit-qpu-call` (default
+  900/200) so a smoke run can use e.g. `--n-trials 2 --limit-epochs 5
+  --limit-qpu-call 10`.
 
-**What is impractical on CPU today**, and why lowering `--limit-qpu-call` alone
-does not help:
+**What CPU is still not good for:**
 
-- **`gqaoa-stability-check`, `gqaoa-bracket`, `gqaoa-stability-bracket`** all use
-  `BEST_KNOWN_CONFIG` internally, which hardcodes the "full" GPT2 architecture
-  (`n_embd=768, n_layer=12, n_head=12`) — there is currently no CLI flag to
-  shrink the model for these three. On CPU, the dominant cost per epoch is the
-  transformer forward/backward pass (run 5x per epoch in `epoch_train`), not the
-  QAOA circuit evaluation itself, so even `gqaoa-stability-check --device-name
-  default.qubit --n-runs 1 --limit-qpu-call 5` does not finish within a minute.
-  Running these three meaningfully on CPU would require also exposing
-  `ModelConfig` overrides on their CLIs (or editing `BEST_KNOWN_CONFIG` in
-  `src/gqaoa/config.py` directly) — not implemented yet.
-- **`gqaoa-hpo`** samples architecture per trial from `{"small", "medium",
-  "full"}` (`experiments/hpo.py::ARCH_PRESETS`) with `limit_qpu_call=200` fixed
-  internally (also not exposed via CLI), so a single trial on CPU can take
-  several minutes regardless of `--n-trials`.
-- Even where a run does complete, `default.qubit` has no CUDA acceleration, so
-  reproducing the documented results tables below (`limit_qpu_call=1000`,
-  `depth=5`, full architecture) is only realistic with a GPU.
+- `default.qubit` has no CUDA acceleration, so reproducing the documented
+  results tables below (`limit_qpu_call=1000`, `depth=5`, full architecture,
+  many repeated runs) is only realistic with a GPU. The overrides above are for
+  validating that a pipeline runs end-to-end without errors, not for
+  reproducing real numbers.
 
 ---
 
@@ -194,6 +201,8 @@ gqaoa-hpo --n-trials 40
 ```
 
 200 QPU calls per trial. Resumes safely — reads remaining trials from `artifacts/optuna.db`.
+`--limit-epochs`/`--limit-qpu-call` override the per-trial budget (e.g. for a CPU smoke run — see
+"Running without a GPU" above).
 
 ### 3. Stability Check (main experiment)
 
@@ -206,6 +215,8 @@ gqaoa-stability-check --n-runs 10 --limit-qpu-call 1000
 ```
 
 Uses `BEST_KNOWN_CONFIG` (annealing: `beta_temp_max=4.0`, `beta_temp_anneal_frac=0.8`, `init_scale=0.1`).
+`--vocab-size`/`--n-embd`/`--n-layer`/`--n-head` override the model architecture (e.g. for a CPU
+smoke run — see "Running without a GPU" above); omit them to keep the full architecture unchanged.
 
 **Statistical results by configuration** (from the original project's runs):
 
@@ -230,7 +241,8 @@ gqaoa-bracket
 
 Budget: 10×80 + 3×50 + 50 = **1000 QPU calls**. Checkpoints are written to
 `artifacts/checkpoints/bracket/` and deleted after each run by default
-(`--no-cleanup-checkpoints` to keep them).
+(`--no-cleanup-checkpoints` to keep them). Same `--vocab-size`/`--n-embd`/`--n-layer`/`--n-head`
+overrides as the stability check are available here too.
 
 ### 5. Bracket Stability (bracket repeated N times)
 
