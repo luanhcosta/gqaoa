@@ -38,6 +38,56 @@ mlflow ui --backend-store-uri sqlite:///artifacts/mlflow.db --allowed-hosts '*' 
 
 ---
 
+## Running without a GPU (CPU-only)
+
+The quantum backend is injected via `--device-name` on every CLI and defaults to
+`"lightning.gpu"` (GPU simulator, requires an NVIDIA GPU + CUDA + the `gpu` extra).
+Passing `--device-name default.qubit` switches to a pure-Python/NumPy statevector
+simulator that ships with PennyLane itself — no GPU or extra required:
+
+```bash
+pip install -e ".[dev]"          # no need for the gpu extra at all
+```
+
+**What is genuinely fast on CPU** (verified: seconds, not minutes):
+
+- **The full test suite** (`pytest`) — `tests/conftest.py` already fixes
+  `device_name="default.qubit"` and uses tiny models/budgets for every
+  unit/integration test, so `pytest` runs green on a machine with no GPU at all
+  (see "Tests" below).
+- **`gqaoa-run`**, if you also shrink the model via its CLI flags (`--vocab-size`,
+  `--n-layer`, `--depth` are all exposed) — e.g. `gqaoa-run --device-name
+  default.qubit --vocab-size 4 --n-layer 1 --depth 2 --limit-epochs 5
+  --limit-qpu-call 5` finishes in ~15s. Using its *defaults* (`--n-layer 12
+  --depth 20`) on CPU is not fast — expect minutes, not seconds.
+- **`gqaoa-benchmark-gd`**, at any budget — the gradient-descent baseline has no
+  neural net at all, so `--limit-qpu-call` directly controls the cost and CPU is
+  fine even at the full 1000-call budget (e.g. `gqaoa-benchmark-gd --device-name
+  default.qubit --n-runs 3` runs in seconds per run).
+
+**What is impractical on CPU today**, and why lowering `--limit-qpu-call` alone
+does not help:
+
+- **`gqaoa-stability-check`, `gqaoa-bracket`, `gqaoa-stability-bracket`** all use
+  `BEST_KNOWN_CONFIG` internally, which hardcodes the "full" GPT2 architecture
+  (`n_embd=768, n_layer=12, n_head=12`) — there is currently no CLI flag to
+  shrink the model for these three. On CPU, the dominant cost per epoch is the
+  transformer forward/backward pass (run 5x per epoch in `epoch_train`), not the
+  QAOA circuit evaluation itself, so even `gqaoa-stability-check --device-name
+  default.qubit --n-runs 1 --limit-qpu-call 5` does not finish within a minute.
+  Running these three meaningfully on CPU would require also exposing
+  `ModelConfig` overrides on their CLIs (or editing `BEST_KNOWN_CONFIG` in
+  `src/gqaoa/config.py` directly) — not implemented yet.
+- **`gqaoa-hpo`** samples architecture per trial from `{"small", "medium",
+  "full"}` (`experiments/hpo.py::ARCH_PRESETS`) with `limit_qpu_call=200` fixed
+  internally (also not exposed via CLI), so a single trial on CPU can take
+  several minutes regardless of `--n-trials`.
+- Even where a run does complete, `default.qubit` has no CUDA acceleration, so
+  reproducing the documented results tables below (`limit_qpu_call=1000`,
+  `depth=5`, full architecture) is only realistic with a GPU.
+
+---
+
 ## Problem
 
 Minimize `energy_min` — the ground state energy of a QUBO/Ising Hamiltonian for a 10-asset portfolio optimization problem.
@@ -83,9 +133,51 @@ is injected via `device_name` on every `run_job()` — see `domain/device.py`.
 
 ---
 
+## Optimizer strategies
+
+All three strategies in `src/gqaoa/strategies/` solve the same problem —
+minimize `energy_min`, the energy of the QAOA cost Hamiltonian — but choose the
+circuit's angle parameters (γ, β) in different ways. They share a common
+`run_job(problem, training, ..., device_name, run_name, checkpoint_in,
+checkpoint_out)` signature (`strategies/base.py::OptimizerStrategy`), which is
+what lets `experiments/bracket.py` and `experiments/stability.py` dispatch to
+any of them through a simple registry instead of duplicating logic per strategy.
+
+- **`gqaoa_strategy.py` — the neural-sampler strategy (the project's main idea).**
+  Instead of optimizing the QAOA angles directly, trains a GPT2 model
+  (`models/gpt_qaoa.py`) to *generate* token sequences that decode into γ/β
+  angles. Training (`models/training.py::epoch_train`) uses a custom
+  "log-probability matching" loss: the model learns to assign high probability
+  to low-energy sequences and low probability to high-energy ones, compared
+  against the best/worst energies seen so far. Each epoch samples at 5
+  different "temperatures" (`beta_temp`, `-beta_temp`, near-random, replay of
+  the best minimum, replay of the best maximum) to explore the search space.
+  It's the only strategy that supports checkpointing (saving/loading model
+  weights), which is what the bracket strategy relies on for warm restarts.
+
+- **`gradient_descent_strategy.py` — classical baseline #1.** PennyLane's
+  `GradientDescentOptimizer` with `diff_method="spsa"` (a stochastic
+  gradient approximation, useful when differentiating the circuit exactly is
+  expensive) acting directly on the γ/β parameters — no neural net at all.
+  Each optimizer step is one QPU call.
+
+- **`scipy_strategy.py` — classical baseline #2.** `scipy.optimize.minimize`
+  (default `COBYLA`, but any scipy method works) treating the QAOA cost
+  function as a black box to minimize. A counter inside the `objective()`
+  closure raises once `limit_qpu_call` is reached, since scipy has no native
+  way to cap the number of function evaluations.
+
+---
+
 ## Experiments
 
+Each experiment below is a thin CLI (`src/gqaoa/cli/`) built on top of
+`src/gqaoa/experiments/`, combining or repeating the strategies above to
+answer a different question.
+
 ### 1. GQAOA dev-run (single training run)
+
+A single training run with the gqaoa strategy, meant for quick debugging/development iteration rather than a real result.
 
 ```bash
 gqaoa-run --limit-epochs 100 --limit-qpu-call 100 --run-name gqaoa-dev
@@ -93,18 +185,21 @@ gqaoa-run --limit-epochs 100 --limit-qpu-call 100 --run-name gqaoa-dev
 
 ### 2. Hyperparameter Optimization (HPO)
 
-Searches for the best config using Optuna's TPE sampler. Results go to experiment `gqaoa-hpo`.
+Searches for the best config for the gqaoa strategy using Optuna's TPE sampler, varying architecture
+(small/medium/full), `depth`, `vocab_size`, `beta_temp`, `optimizer_lr` — this is how `BEST_KNOWN_CONFIG`
+was originally found. Results go to experiment `gqaoa-hpo`.
 
 ```bash
 gqaoa-hpo --n-trials 40
 ```
 
-200 QPU calls per trial, search space over `arch` (small/medium/full), `depth`, `vocab_size`, `beta_temp`, `optimizer_lr`.
-Resumes safely — reads remaining trials from `artifacts/optuna.db`.
+200 QPU calls per trial. Resumes safely — reads remaining trials from `artifacts/optuna.db`.
 
 ### 3. Stability Check (main experiment)
 
-Runs the gqaoa strategy N times and reports the statistical distribution of `energy_min`. Results go to `gqaoa-stability`.
+Runs the gqaoa strategy N times with `BEST_KNOWN_CONFIG` and reports the statistical distribution of
+`energy_min` (min/percentiles/mean/std) — measures how consistent the best known config actually is
+across independent runs. Results go to `gqaoa-stability`.
 
 ```bash
 gqaoa-stability-check --n-runs 10 --limit-qpu-call 1000
@@ -123,7 +218,11 @@ Uses `BEST_KNOWN_CONFIG` (annealing: `beta_temp_max=4.0`, `beta_temp_anneal_frac
 
 ### 4. Bracket Strategy (single run)
 
-Multi-phase exploration: diverse Phase 1 → warm restart top-K into Phase 2 → top-1 into Phase 3. Results go to `gqaoa-bracket`.
+Multi-phase warm-restart exploration on top of the gqaoa strategy: 10 diverse runs of 80 calls each
+(Phase 1) → the 3 best continue for 50 more calls each, resuming from checkpoint (Phase 2) → the best
+of those continues for 50 more calls (Phase 3). Same total budget as the stability check (1000 QPU
+calls), but spends it exploring broadly before committing to refining the most promising candidates.
+Results go to `gqaoa-bracket`.
 
 ```bash
 gqaoa-bracket
@@ -135,7 +234,9 @@ Budget: 10×80 + 3×50 + 50 = **1000 QPU calls**. Checkpoints are written to
 
 ### 5. Bracket Stability (bracket repeated N times)
 
-Runs the full bracket strategy N times to measure its statistical stability.
+Runs the full bracket strategy (item 4) N times back-to-back, to check whether the bracket approach
+itself is consistent or has high variance across independent executions — the bracket-strategy
+equivalent of item 3's stability check.
 
 ```bash
 gqaoa-stability-bracket --n-repetitions 3
@@ -143,12 +244,20 @@ gqaoa-stability-bracket --n-repetitions 3
 
 ### 6. Benchmark — Gradient Descent (classical baseline)
 
-PennyLane `GradientDescentOptimizer` + SPSA. Results go to its own experiment, `gqaoa-benchmark-gd`
+Runs the classical `gradient_descent_strategy` (PennyLane `GradientDescentOptimizer` + SPSA) N times
+with the same QPU-call budget as the stability check, as the "does the neural sampler actually help?"
+comparison point. Results go to its own experiment, `gqaoa-benchmark-gd`
 (the original project's `benchmark_gd.py` mistakenly shared `gqaoa-stability` — fixed here).
 
 ```bash
 gqaoa-benchmark-gd --n-runs 10
 ```
+
+> `scipy_strategy.py` has a working, tested `run_job()`
+> (`tests/integration/test_scipy_strategy_pipeline.py`) but no dedicated benchmark CLI yet — the
+> original project didn't have one either (`scipy_minimize.py` was a standalone script with no
+> systematic comparison). Add a `gqaoa-benchmark-scipy` following `cli/run_benchmark_gd.py`'s pattern,
+> reusing `experiments/stability.py::run_stability(strategy="scipy", ...)`, if you need it.
 
 ---
 
