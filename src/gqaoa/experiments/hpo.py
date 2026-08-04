@@ -56,7 +56,12 @@ def objective(
     return result["final_exp_val"]
 
 
-def main(n_trials: int = 40, device_name: str = "lightning.gpu") -> None:
+def main(
+    n_trials: int = 40,
+    device_name: str = "lightning.gpu",
+    limit_epochs: int = 900,
+    limit_qpu_call: int = 200,
+) -> None:
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment("gqaoa-hpo")
@@ -74,7 +79,10 @@ def main(n_trials: int = 40, device_name: str = "lightning.gpu") -> None:
     print(f"Trials completed: {completed} / {n_trials}  —  running {remaining} more")
 
     study.optimize(
-        lambda trial: objective(trial, device_name=device_name),
+        lambda trial: objective(
+            trial, device_name=device_name,
+            limit_epochs=limit_epochs, limit_qpu_call=limit_qpu_call,
+        ),
         n_trials=remaining, show_progress_bar=True, catch=(Exception,),
     )
 
