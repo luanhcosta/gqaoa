@@ -3,6 +3,7 @@ import argparse
 
 from gqaoa.config import ModelConfig, ProblemConfig, RING_TOPOLOGY_EDGES, TrainingConfig
 from gqaoa.strategies import gqaoa_strategy
+from gqaoa.tracking.mlflow_utils import init_mlflow
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -21,6 +22,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> None:
     args = build_arg_parser().parse_args(argv)
+
+    init_mlflow("gqaoa-dev")
 
     problem = ProblemConfig(
         q=0.3, B=5, lamb=0,
