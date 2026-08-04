@@ -164,29 +164,35 @@ def run_job(
                 energy_max = energy_max0
                 full_input_ids_energy_max = full_input_ids_max0
 
-            mlflow.log_metric("energy_min", energy_min, step=i)
-            mlflow.log_metric("energy_beta_temp", energy_beta_temp, step=i)
-            mlflow.log_metric("energy_max", energy_max, step=i)
-            mlflow.log_metric("energy_beta_temp_neg", energy_beta_temp_neg, step=i)
-            mlflow.log_metric("energy_beta_temp_random", energy_beta_temp_random, step=i)
-            mlflow.log_metric("sum_w_energy_min", sum_w_energy_min, step=i)
-            mlflow.log_metric("sum_w_beta_temp", sum_w_beta_temp, step=i)
-            mlflow.log_metric("sum_w_energy_max", sum_w_energy_max, step=i)
-            mlflow.log_metric("sum_w_beta_temp_neg", sum_w_beta_temp_neg, step=i)
-            mlflow.log_metric("w_less_sum_energy_min", w_less_full_input_ids, step=i)
-            mlflow.log_metric("loss0", loss0, step=i)
-            mlflow.log_metric("loss_log_pr_beta_temp", loss_log_pr_beta_temp_item, step=i)
-            mlflow.log_metric("loss_log_pr_beta_temp_neg", loss_log_pr_beta_temp_neg_item, step=i)
-            mlflow.log_metric("loss_log_pr_beta_temp_random", loss_log_pr_beta_temp_random_item, step=i)
-            mlflow.log_metric("loss_log_pr_energy_max", loss_log_pr_energy_max_item, step=i)
-            mlflow.log_metric("log_pr_ids_energy_min", log_pr_ids_energy_min_item, step=i)
-            mlflow.log_metric("log_pr_ids_energy_max", log_pr_ids_energy_max_item, step=i)
-            mlflow.log_metric("log_pr_ids_beta_temp", log_pr_ids_beta_temp_item, step=i)
-            mlflow.log_metric("log_pr_ids_beta_temp_neg", log_pr_ids_beta_temp_neg_item, step=i)
-            mlflow.log_metric("log_pr_ids_beta_temp_random", log_pr_ids_beta_temp_random_item, step=i)
-            mlflow.log_metric("count_qpu_call", qaoa.count_qpu_call, step=i)
-            mlflow.log_metric("lr", scheduler.get_last_lr()[0], step=i)
-            mlflow.log_metric("beta_temp_current", beta_temp_current, step=i)
+            try:
+                mlflow.log_metric("energy_min", energy_min, step=i)
+                mlflow.log_metric("energy_beta_temp", energy_beta_temp, step=i)
+                mlflow.log_metric("energy_max", energy_max, step=i)
+                mlflow.log_metric("energy_beta_temp_neg", energy_beta_temp_neg, step=i)
+                mlflow.log_metric("energy_beta_temp_random", energy_beta_temp_random, step=i)
+                mlflow.log_metric("sum_w_energy_min", sum_w_energy_min, step=i)
+                mlflow.log_metric("sum_w_beta_temp", sum_w_beta_temp, step=i)
+                mlflow.log_metric("sum_w_energy_max", sum_w_energy_max, step=i)
+                mlflow.log_metric("sum_w_beta_temp_neg", sum_w_beta_temp_neg, step=i)
+                mlflow.log_metric("w_less_sum_energy_min", w_less_full_input_ids, step=i)
+                mlflow.log_metric("loss0", loss0, step=i)
+                mlflow.log_metric("loss_log_pr_beta_temp", loss_log_pr_beta_temp_item, step=i)
+                mlflow.log_metric("loss_log_pr_beta_temp_neg", loss_log_pr_beta_temp_neg_item, step=i)
+                mlflow.log_metric("loss_log_pr_beta_temp_random", loss_log_pr_beta_temp_random_item, step=i)
+                mlflow.log_metric("loss_log_pr_energy_max", loss_log_pr_energy_max_item, step=i)
+                mlflow.log_metric("log_pr_ids_energy_min", log_pr_ids_energy_min_item, step=i)
+                mlflow.log_metric("log_pr_ids_energy_max", log_pr_ids_energy_max_item, step=i)
+                mlflow.log_metric("log_pr_ids_beta_temp", log_pr_ids_beta_temp_item, step=i)
+                mlflow.log_metric("log_pr_ids_beta_temp_neg", log_pr_ids_beta_temp_neg_item, step=i)
+                mlflow.log_metric("log_pr_ids_beta_temp_random", log_pr_ids_beta_temp_random_item, step=i)
+                mlflow.log_metric("count_qpu_call", qaoa.count_qpu_call, step=i)
+                mlflow.log_metric("lr", scheduler.get_last_lr()[0], step=i)
+                mlflow.log_metric("beta_temp_current", beta_temp_current, step=i)
+            except Exception as exc:
+                # A transient MLflow/SQLite hiccup (e.g. lock contention with a
+                # concurrently running `mlflow ui`) shouldn't discard an entire
+                # training run's worth of compute over a missed metrics log.
+                logging.warning(f"epoch {i}: failed to log metrics to MLflow ({exc}); continuing training")
 
             scheduler.step(i)
 
