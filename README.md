@@ -42,6 +42,7 @@ mlflow ui --backend-store-uri sqlite:///artifacts/mlflow.db --allowed-hosts '*' 
 | Bracket strategy | `gqaoa-bracket` |
 | HPO | `gqaoa-hpo` |
 | Benchmark (classical GD baseline) | `gqaoa-benchmark-gd` |
+| Benchmark (classical scipy baseline) | `gqaoa-benchmark-scipy` |
 
 ---
 
@@ -67,10 +68,11 @@ pip install -e ".[dev]"          # no need for the gpu extra at all
   default.qubit --vocab-size 4 --n-layer 1 --depth 2 --limit-epochs 5
   --limit-qpu-call 5` finishes in ~15s. Using its *defaults* (`--n-layer 12
   --depth 20`) on CPU is not fast — expect minutes, not seconds.
-- **`gqaoa-benchmark-gd`**, at any budget — the gradient-descent baseline has no
-  neural net at all, so `--limit-qpu-call` directly controls the cost and CPU is
-  fine even at the full 1000-call budget (e.g. `gqaoa-benchmark-gd --device-name
-  default.qubit --n-runs 3` runs in seconds per run).
+- **`gqaoa-benchmark-gd`, `gqaoa-benchmark-scipy`**, at any budget — neither classical
+  baseline has a neural net at all, so `--limit-qpu-call` directly controls the cost and
+  CPU is fine even at the full 1000-call budget (e.g. `gqaoa-benchmark-gd --device-name
+  default.qubit --n-runs 3` or `gqaoa-benchmark-scipy --device-name default.qubit
+  --n-runs 3` both run in seconds per run).
 - **`gqaoa-stability-check`, `gqaoa-bracket`, `gqaoa-stability-bracket`, `gqaoa-hpo`**,
   *if you also shrink the model* — all four use `BEST_KNOWN_CONFIG`'s "full" GPT2
   architecture (`n_embd=768, n_layer=12, n_head=12`) by default, and on CPU the
@@ -283,11 +285,27 @@ comparison point. Results go to its own experiment, `gqaoa-benchmark-gd`
 gqaoa-benchmark-gd --n-runs 10
 ```
 
-> `scipy_strategy.py` has a working, tested `run_job()`
-> (`tests/integration/test_scipy_strategy_pipeline.py`) but no dedicated benchmark CLI yet — the
-> original project didn't have one either (`scipy_minimize.py` was a standalone script with no
-> systematic comparison). Add a `gqaoa-benchmark-scipy` following `cli/run_benchmark_gd.py`'s pattern,
-> reusing `experiments/stability.py::run_stability(strategy="scipy", ...)`, if you need it.
+### 7. Benchmark — scipy (classical baseline)
+
+Runs the classical `scipy_strategy` (`scipy.optimize.minimize`) N times, the same "does the
+neural sampler actually help?" comparison as item 6, for whichever `scipy.optimize.minimize`
+algorithm you pass via `--minimize-method` (e.g. `COBYLA`, `Nelder-Mead`, `Powell`, `CG`, `BFGS`,
+`L-BFGS-B`, `TNC`, `SLSQP`, `trust-constr` — see
+[scipy's docs](https://docs.scipy.org/doc/scipy/reference/optimize.minimize-neldermead.html) for
+the full list and which accept bounds/constraints). Results go to their own experiment,
+`gqaoa-benchmark-scipy`, with the method name in the run-name prefix so different algorithms are
+easy to tell apart.
+
+```bash
+gqaoa-benchmark-scipy --n-runs 10 --minimize-method COBYLA
+gqaoa-benchmark-scipy --n-runs 10 --minimize-method Nelder-Mead
+```
+
+`experiments/stability.py::run_stability()` takes an optional `strategy_kwargs` dict, forwarded
+verbatim to the strategy's `run_job()` on every run — this is what threads `--minimize-method`
+through, since it's specific to the scipy strategy and isn't a `TrainingConfig` field. Any future
+strategy-specific CLI flag (for a new strategy, or a new scipy option) can reuse the same
+mechanism instead of growing `TrainingConfig`.
 
 ---
 
