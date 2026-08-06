@@ -1,5 +1,4 @@
 import os
-import math
 import logging
 from typing import Optional
 
@@ -16,7 +15,7 @@ from gqaoa.domain.qaoa import QAOA
 from gqaoa.models.gpt_qaoa import GPT2_QAOA
 from gqaoa.models.training import epoch_train
 from gqaoa.strategies.base import StrategyResult
-from gqaoa.strategies.common import build_problem
+from gqaoa.strategies.common import beta_temp_schedule, build_problem
 
 logging.basicConfig(level=logging.INFO)
 
@@ -112,13 +111,8 @@ def run_job(
             nn_qaoa.load_state_dict(ckpt['model_state'])
             logging.info(f'Loaded checkpoint from {checkpoint_in} (prev energy_min={ckpt.get("energy_min", "?")})')
 
-        _beta_max = training.beta_temp_max if training.beta_temp_max is not None else training.beta_temp
-        _beta_anneal_qpu = training.beta_temp_anneal_frac * training.limit_qpu_call
-
         for i in range(training.limit_epochs):
-            # cosine annealing: beta_temp_max → beta_temp over first anneal_frac of QPU budget
-            t = min(qaoa.count_qpu_call / max(_beta_anneal_qpu, 1), 1.0)
-            beta_temp_current = training.beta_temp + (_beta_max - training.beta_temp) * 0.5 * (1 + math.cos(math.pi * t))
+            beta_temp_current = beta_temp_schedule(training, qaoa.count_qpu_call)
 
             (
              loss0,
