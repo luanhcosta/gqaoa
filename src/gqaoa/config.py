@@ -90,3 +90,10 @@ def replace_training(config: BestKnownConfig, **kwargs) -> BestKnownConfig:
     return dataclasses.replace(
         config, training=dataclasses.replace(config.training, **kwargs)
     )
+
+
+# Ablation config: identical to BEST_KNOWN_CONFIG except beta_temp_max=None, which
+# disables cosine annealing in gqaoa_strategy.run_job() (beta_temp_current stays
+# constant at training.beta_temp for every epoch). Used by
+# `gqaoa-stability-check --no-annealing` to measure annealing's contribution.
+NO_ANNEAL_CONFIG: BestKnownConfig = replace_training(BEST_KNOWN_CONFIG, beta_temp_max=None)

@@ -96,3 +96,37 @@ def test_hpo_cli_default_limits_match_objective_defaults():
     args = run_hpo.build_arg_parser().parse_args([])
     assert args.limit_epochs == 900
     assert args.limit_qpu_call == 200
+
+
+def test_stability_check_cli_default_uses_annealing():
+    args = run_stability_check.build_arg_parser().parse_args([])
+    assert args.no_annealing is False
+
+
+def test_stability_check_cli_default_threads_best_known_config(monkeypatch):
+    captured = {}
+
+    def fake_run_stability(**kwargs):
+        captured.update(kwargs)
+        return [], {}
+
+    monkeypatch.setattr(run_stability_check, "run_stability", fake_run_stability)
+    run_stability_check.main(["--limit-qpu-call", "50"])
+
+    assert captured["base_config"].training.beta_temp_max == 4.0
+    assert captured["run_name_prefix"] == "stability_anneal_50"
+
+
+def test_stability_check_cli_no_annealing_flag_threads_no_anneal_config(monkeypatch):
+    captured = {}
+
+    def fake_run_stability(**kwargs):
+        captured.update(kwargs)
+        return [], {}
+
+    monkeypatch.setattr(run_stability_check, "run_stability", fake_run_stability)
+    run_stability_check.main(["--no-annealing", "--n-runs", "1", "--limit-qpu-call", "50"])
+
+    assert captured["base_config"].training.beta_temp_max is None
+    assert captured["run_name_prefix"] == "stability_no_anneal_50"
+    assert captured["n_runs"] == 1

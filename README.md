@@ -109,13 +109,16 @@ Minimize `energy_min` — the ground state energy of a QUBO/Ising Hamiltonian fo
 Found via Optuna TPE (`gqaoa-hpo run`), stored in `gqaoa.config.BEST_KNOWN_CONFIG`:
 
 ```python
-optimizer_lr = 3.86e-4
-vocab_size   = 20
-n_embd       = 768
-n_layer      = 12
-n_head       = 12
-beta_temp    = 0.7817   # final value after annealing
-depth        = 5
+optimizer_lr           = 3.86e-4
+vocab_size             = 20
+n_embd                 = 768
+n_layer                = 12
+n_head                 = 12
+beta_temp              = 0.7817   # final value after annealing
+beta_temp_max          = 4.0      # starting value (None = no annealing, see NO_ANNEAL_CONFIG)
+beta_temp_anneal_frac  = 0.8      # fraction of QPU budget spent annealing
+init_scale             = 0.1
+depth                  = 5
 ```
 
 ---
@@ -214,9 +217,24 @@ across independent runs. Results go to `gqaoa-stability`.
 gqaoa-stability-check --n-runs 10 --limit-qpu-call 1000
 ```
 
-Uses `BEST_KNOWN_CONFIG` (annealing: `beta_temp_max=4.0`, `beta_temp_anneal_frac=0.8`, `init_scale=0.1`).
-`--vocab-size`/`--n-embd`/`--n-layer`/`--n-head` override the model architecture (e.g. for a CPU
-smoke run — see "Running without a GPU" above); omit them to keep the full architecture unchanged.
+Uses `BEST_KNOWN_CONFIG` by default (annealing: `beta_temp_max=4.0`, `beta_temp_anneal_frac=0.8`,
+`init_scale=0.1`). `--vocab-size`/`--n-embd`/`--n-layer`/`--n-head` override the model architecture
+(e.g. for a CPU smoke run — see "Running without a GPU" above); omit them to keep the full
+architecture unchanged.
+
+Pass `--no-annealing` to run the same config with `beta_temp` held constant instead (via
+`gqaoa.config.NO_ANNEAL_CONFIG` — identical to `BEST_KNOWN_CONFIG` except `beta_temp_max=None`),
+reproducing the "Baseline (no annealing)" row below and letting you measure annealing's actual
+contribution. A single isolated run is just `--n-runs 1`:
+
+```bash
+gqaoa-stability-check --no-annealing --n-runs 10 --limit-qpu-call 1000   # ablation, N runs
+gqaoa-stability-check --no-annealing --n-runs 1  --limit-qpu-call 1000   # ablation, 1 isolated run
+```
+
+Both modes log to the same `gqaoa-stability` experiment — the `stability_anneal_*`/
+`stability_no_anneal_*` run-name prefix and the `stability_summary` run's `beta_temp_max` param
+(`None` vs `4.0`) tell them apart for side-by-side comparison in the MLflow UI.
 
 **Statistical results by configuration** (from the original project's runs):
 
