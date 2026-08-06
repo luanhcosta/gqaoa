@@ -171,13 +171,24 @@ any of them through a simple registry instead of duplicating logic per strategy.
   `GradientDescentOptimizer` with `diff_method="spsa"` (a stochastic
   gradient approximation, useful when differentiating the circuit exactly is
   expensive) acting directly on the γ/β parameters — no neural net at all.
-  Each optimizer step is one QPU call.
+  Each optimizer step is exactly one QPU call regardless of depth (verified:
+  10 steps ⇒ 10 circuit evaluations at both depth=1 and depth=5), so
+  `--limit-qpu-call` bounds the real cost precisely.
 
-- **`scipy_strategy.py` — classical baseline #2.** `scipy.optimize.minimize`
-  (default `COBYLA`, but any scipy method works) treating the QAOA cost
-  function as a black box to minimize. A counter inside the `objective()`
-  closure raises once `limit_qpu_call` is reached, since scipy has no native
-  way to cap the number of function evaluations.
+- **`scipy_strategy.py` — classical baseline #2.** `scipy.optimize.minimize`,
+  parametrized over `minimize_method` (default `COBYLA`, but any scipy method
+  works — see item 7), treating the QAOA cost function as a black box to
+  minimize. A counter inside the `objective()` closure aborts the solver once
+  `limit_qpu_call` is spent, since scipy has no native way to cap the number
+  of function evaluations. Derivative-free methods (`COBYLA`, `Nelder-Mead`,
+  `Powell`) keep their own `maxiter`/`maxfev` close enough to the true
+  eval count that this rarely triggers; gradient-based methods (`BFGS`, `CG`,
+  `L-BFGS-B`, `SLSQP`, ...) estimate gradients by finite differences, spend
+  several evaluations per solver iteration, and reliably hit this abort
+  before `maxiter` (an iteration count, not an eval count) would — in that
+  case the best point/energy seen so far is returned instead of crashing,
+  and a `qpu_budget_exceeded` MLflow param is logged so it's visible which
+  runs took that path.
 
 ---
 
@@ -282,8 +293,12 @@ comparison point. Results go to its own experiment, `gqaoa-benchmark-gd`
 (the original project's `benchmark_gd.py` mistakenly shared `gqaoa-stability` — fixed here).
 
 ```bash
-gqaoa-benchmark-gd --n-runs 10
+gqaoa-benchmark-gd --n-runs 10 --limit-qpu-call 1000
 ```
+
+`--limit-qpu-call` is exact here — each SPSA optimizer step is one QPU call (see the
+`gradient_descent_strategy.py` note above), so it directly bounds the real cost with no risk of
+overrun.
 
 ### 7. Benchmark — scipy (classical baseline)
 
@@ -297,9 +312,15 @@ the full list and which accept bounds/constraints). Results go to their own expe
 easy to tell apart.
 
 ```bash
-gqaoa-benchmark-scipy --n-runs 10 --minimize-method COBYLA
-gqaoa-benchmark-scipy --n-runs 10 --minimize-method Nelder-Mead
+gqaoa-benchmark-scipy --n-runs 10 --minimize-method COBYLA --limit-qpu-call 1000
+gqaoa-benchmark-scipy --n-runs 10 --minimize-method Nelder-Mead --limit-qpu-call 1000
+gqaoa-benchmark-scipy --n-runs 10 --minimize-method BFGS --limit-qpu-call 1000
 ```
+
+`--limit-qpu-call` behaves differently depending on `--minimize-method` — see the
+`scipy_strategy.py` note above: exact for derivative-free methods (`COBYLA`, `Nelder-Mead`,
+`Powell`), a soft cap for gradient-based ones (falls back to the best point seen so far instead of
+crashing, flagged via the `qpu_budget_exceeded` MLflow param).
 
 `experiments/stability.py::run_stability()` takes an optional `strategy_kwargs` dict, forwarded
 verbatim to the strategy's `run_job()` on every run — this is what threads `--minimize-method`
