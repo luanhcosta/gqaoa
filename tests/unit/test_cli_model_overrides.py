@@ -89,6 +89,7 @@ def test_hpo_cli_exposes_and_threads_limit_flags(monkeypatch):
         "device_name": "default.qubit",
         "limit_epochs": 5,
         "limit_qpu_call": 10,
+        "sdp": True,
     }
 
 

@@ -10,6 +10,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device-name", default="lightning.gpu")
     parser.add_argument("--limit-epochs", type=int, default=900)
     parser.add_argument("--limit-qpu-call", type=int, default=200)
+    parser.add_argument("--no-sdp", action="store_true",
+                         help="Skip the SDP compression preprocessing step (default: enabled)")
     return parser
 
 
@@ -18,6 +20,7 @@ def main(argv=None) -> None:
     run_hpo_main(
         n_trials=args.n_trials, device_name=args.device_name,
         limit_epochs=args.limit_epochs, limit_qpu_call=args.limit_qpu_call,
+        sdp=not args.no_sdp,
     )
 
 

@@ -40,3 +40,16 @@ def apply_model_overrides(config: BestKnownConfig, args: argparse.Namespace) -> 
     if not overrides:
         return config
     return dataclasses.replace(config, model=dataclasses.replace(config.model, **overrides))
+
+
+def add_sdp_override_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--no-sdp", action="store_true",
+        help="Skip the SDP compression preprocessing step (default: enabled, as in BEST_KNOWN_CONFIG)",
+    )
+
+
+def apply_sdp_override(config: BestKnownConfig, args: argparse.Namespace) -> BestKnownConfig:
+    if not args.no_sdp:
+        return config
+    return dataclasses.replace(config, problem=dataclasses.replace(config.problem, sdp=False))

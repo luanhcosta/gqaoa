@@ -105,6 +105,8 @@ Minimize `energy_min` — the ground state energy of a QUBO/Ising Hamiltonian fo
 - **QPU calls** are the real cost metric — each circuit evaluation on the simulator counts as one call
 - **Graph:** 10-node ring — `gqaoa.config.RING_TOPOLOGY_EDGES`
 - **Fixed params:** `q=0.3, B=5, lamb=0, sdp=True, initial_state=dicke_state, mixture_layer=xy`
+  (`sdp` defaults to `True` but is overridable per-CLI via `--no-sdp` — see
+  "SDP compression preprocessing" below)
 
 ## Best known configuration
 
@@ -189,6 +191,33 @@ any of them through a simple registry instead of duplicating logic per strategy.
   case the best point/energy seen so far is returned instead of crashing,
   and a `qpu_budget_exceeded` MLflow param is logged so it's visible which
   runs took that path.
+
+---
+
+## SDP compression preprocessing
+
+Before any of the three strategies run, `strategies/common.py::build_problem()` optionally
+compresses the covariance matrix via a semidefinite-programming (SDP) solve
+(`domain/compression.py::compress_matrix()`, using `cvxpy`/`cp.SCS`) over the problem graph
+(`edges_hc`). This is gated by `ProblemConfig.sdp` (default `True` in `BEST_KNOWN_CONFIG` and every
+CLI's fixed params).
+
+Every experiment CLI below exposes `--no-sdp` to skip this step — it sets `ProblemConfig.sdp = False`,
+so `build_problem()` returns the original, uncompressed covariance matrix instead of calling the SDP
+solver:
+
+```bash
+gqaoa-run --no-sdp
+gqaoa-hpo --no-sdp
+gqaoa-stability-check --no-sdp
+gqaoa-bracket --no-sdp
+gqaoa-stability-bracket --no-sdp
+gqaoa-benchmark-gd --no-sdp
+gqaoa-benchmark-scipy --no-sdp
+```
+
+Useful to isolate the SDP step's contribution to `energy_min`, or to skip its `cvxpy` dependency/cost
+entirely when it isn't needed.
 
 ---
 
@@ -357,7 +386,7 @@ without needing a GPU.
 | `src/gqaoa/models/training.py` | `epoch_train()` — one training epoch |
 | `src/gqaoa/domain/qaoa.py` | QAOA circuit definition, QPU call counter |
 | `src/gqaoa/domain/data.py` | Expected returns + covariance matrix for the 10-asset problem |
-| `src/gqaoa/domain/compression.py` | SDP compression for the problem graph |
+| `src/gqaoa/domain/compression.py` | SDP compression for the problem graph (skip via `--no-sdp`, see "SDP compression preprocessing" above) |
 | `src/gqaoa/experiments/bracket.py` | Unified bracket strategy (single run or repeated) |
 | `src/gqaoa/experiments/stability.py` | Unified repeated-run stability analysis (any strategy) |
 | `src/gqaoa/experiments/hpo.py` | Optuna HPO search |

@@ -5,7 +5,12 @@ Runs gqaoa_strategy.run_job N times and reports statistics on energy_min.
 import argparse
 import dataclasses
 
-from gqaoa.cli._common import add_model_override_args, apply_model_overrides
+from gqaoa.cli._common import (
+    add_model_override_args,
+    add_sdp_override_args,
+    apply_model_overrides,
+    apply_sdp_override,
+)
 from gqaoa.config import BEST_KNOWN_CONFIG, NO_ANNEAL_CONFIG
 from gqaoa.experiments.stability import run_stability
 
@@ -21,6 +26,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
              "instead of BEST_KNOWN_CONFIG). Default: annealing enabled.",
     )
     add_model_override_args(parser)
+    add_sdp_override_args(parser)
     return parser
 
 
@@ -32,6 +38,7 @@ def main(argv=None) -> None:
         training=dataclasses.replace(base.training, limit_qpu_call=args.limit_qpu_call),
     )
     config = apply_model_overrides(config, args)
+    config = apply_sdp_override(config, args)
     anneal_label = "no_anneal" if args.no_annealing else "anneal"
     run_stability(
         strategy="gqaoa",

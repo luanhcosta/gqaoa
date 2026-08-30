@@ -5,6 +5,7 @@ Confirmation  : run gqaoa_strategy.run_job manually with the best params at full
 
 Resumable: re-running main() picks up remaining trials from optuna.db.
 """
+import dataclasses
 import logging
 
 import mlflow
@@ -36,6 +37,7 @@ def objective(
     device_name: str = "lightning.gpu",
     limit_epochs: int = 900,
     limit_qpu_call: int = 200,
+    sdp: bool = True,
 ) -> float:
     arch = trial.suggest_categorical("arch", list(ARCH_PRESETS.keys()))
     depth = trial.suggest_categorical("depth", [5, 10, 15, 20])
@@ -48,9 +50,10 @@ def objective(
         depth=depth, limit_epochs=limit_epochs, limit_qpu_call=limit_qpu_call,
         optimizer_lr=optimizer_lr, beta_temp=beta_temp,
     )
+    problem = dataclasses.replace(FIXED_PROBLEM, sdp=sdp)
 
     result = gqaoa_strategy.run_job(
-        FIXED_PROBLEM, training, model,
+        problem, training, model,
         device_name=device_name, run_name=f"hpo_trial_{trial.number}",
     )
     return result["final_exp_val"]
@@ -61,6 +64,7 @@ def main(
     device_name: str = "lightning.gpu",
     limit_epochs: int = 900,
     limit_qpu_call: int = 200,
+    sdp: bool = True,
 ) -> None:
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
@@ -81,7 +85,7 @@ def main(
     study.optimize(
         lambda trial: objective(
             trial, device_name=device_name,
-            limit_epochs=limit_epochs, limit_qpu_call=limit_qpu_call,
+            limit_epochs=limit_epochs, limit_qpu_call=limit_qpu_call, sdp=sdp,
         ),
         n_trials=remaining, show_progress_bar=True, catch=(Exception,),
     )

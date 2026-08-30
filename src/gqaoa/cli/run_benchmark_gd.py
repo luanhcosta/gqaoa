@@ -2,6 +2,7 @@
 import argparse
 import dataclasses
 
+from gqaoa.cli._common import add_sdp_override_args, apply_sdp_override
 from gqaoa.config import BEST_KNOWN_CONFIG
 from gqaoa.experiments.stability import run_stability
 
@@ -13,6 +14,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--depth", type=int, default=5)
     parser.add_argument("--limit-qpu-call", type=int, default=1000)
     parser.add_argument("--device-name", default="lightning.gpu")
+    add_sdp_override_args(parser)
     return parser
 
 
@@ -27,6 +29,7 @@ def main(argv=None) -> None:
             limit_qpu_call=args.limit_qpu_call,
         ),
     )
+    config = apply_sdp_override(config, args)
     # gqaoa-benchmark-gd is a distinct experiment name from gqaoa-stability,
     # fixing the old benchmark_gd.py bug of sharing stability_check.py's experiment.
     run_stability(

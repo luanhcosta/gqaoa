@@ -17,6 +17,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit-qpu-call", type=int, default=900)
     parser.add_argument("--run-name", default="gqaoa")
     parser.add_argument("--device-name", default="lightning.gpu")
+    parser.add_argument("--no-sdp", action="store_true",
+                         help="Skip the SDP compression preprocessing step (default: enabled)")
     return parser
 
 
@@ -29,7 +31,7 @@ def main(argv=None) -> None:
         q=0.3, B=5, lamb=0,
         initial_state="dicke_state", mixture_layer="xy",
         edges_hc=RING_TOPOLOGY_EDGES, edges_hb=RING_TOPOLOGY_EDGES,
-        sdp=True,
+        sdp=not args.no_sdp,
     )
     model = ModelConfig(vocab_size=args.vocab_size, n_layer=args.n_layer)
     training = TrainingConfig(
