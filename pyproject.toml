@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 gpu = ["pennylane-lightning[gpu]"]
 hpo = ["optuna>=3.6.0"]  # only needed by gqaoa-hpo / gqaoa.experiments.hpo
+yfinance = ["yfinance>=0.2.40"]  # only needed by gqaoa.problem.yfinance_source
 dev = ["pytest>=8.0", "pytest-cov", "ruff"]
 
 [project.scripts]
