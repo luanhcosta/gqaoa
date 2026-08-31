@@ -132,8 +132,9 @@ depth                  = 5
 ```
 src/gqaoa/
 ├── config.py       # RING_TOPOLOGY_EDGES, ProblemConfig/ModelConfig/TrainingConfig, BEST_KNOWN_CONFIG
-├── paths.py        # artifacts/ (mlflow.db, optuna.db, checkpoints/) resolution
+├── paths.py        # artifacts/ (mlflow.db, optuna.db, checkpoints/, problems/) resolution
 ├── domain/         # pure quantum logic: QAOA Hamiltonian, data, SDP compression, injectable device
+├── problem/        # ProblemInstance generation (synthetic/yfinance/legacy) + persistence
 ├── models/         # GPT2_QAOA model + epoch_train training loop
 ├── strategies/      # the 3 optimizer strategies behind a common run_job() interface
 ├── experiments/     # bracket (warm-restart), stability (repeated-run stats), hpo
@@ -141,6 +142,104 @@ src/gqaoa/
 ├── reporting/        # report_stats()
 └── cli/             # thin argparse entry points, one per experiment below
 ```
+
+---
+
+## Generating problem instances (`gqaoa.problem`)
+
+The fixed 10-asset problem (`domain/data.py::f_return_cov` + `RING_TOPOLOGY_EDGES`) that
+every strategy/CLI above uses by default is one specific instance of a more general
+portfolio problem: N assets, an expected-return vector, a covariance matrix, and a
+QAOA edge topology. `gqaoa.problem` generates and persists that more general
+`ProblemInstance` — from synthetic data, from real tickers via yfinance, or wrapping the
+existing fixed problem — independently of the strategies/CLIs (this module doesn't feed
+into `build_problem()` yet; that wiring is separate follow-up work).
+
+A `ProblemInstance` (`gqaoa.problem.ProblemInstance`) always carries: `problem_id`,
+`n_assets`, `asset_names`, `expected_value`, `cov_matrix` (a `pandas.DataFrame`, same
+shape `f_return_cov()` has always produced), `edges_hc`/`edges_hb` (QAOA cost/mixer
+graph edges), `source`, `provenance` (exactly how it was generated), `created_at`, and
+`schema_version`.
+
+### Generating synthetic data
+
+`generate_synthetic_problem` fabricates a problem for any number of assets `N`: it
+builds a random PSD target covariance, simulates a correlated daily log-return random
+walk from it over `n_trading_days` (default 756, ~3 trading years), then derives
+`expected_value`/`cov_matrix` from that simulated series (annualized ×252).
+
+```python
+from gqaoa.problem import generate_synthetic_problem
+
+instance = generate_synthetic_problem(n_assets=20, seed=42)          # ring topology (default)
+instance = generate_synthetic_problem(n_assets=20, seed=42, topology="complete")
+```
+
+- `seed`: fixes every random draw — the same seed always reproduces the exact same
+  instance (values, edges, `problem_id`). Omit it and one is drawn for you, but it's
+  still recorded in `instance.provenance["seed"]` so the run stays reproducible.
+- `n_trading_days` / `topology` (`"ring"` or `"complete"`) are also overridable; see
+  `generate_synthetic_problem`'s signature in `src/gqaoa/problem/synthetic.py`.
+
+### Generating data from a list of assets (yfinance)
+
+`generate_yfinance_problem` downloads real adjusted-close prices for a list of tickers
+and derives `expected_value`/`cov_matrix` from their historical daily log-returns
+(same ×252 annualization convention as the synthetic generator). It needs the optional
+`yfinance` extra:
+
+```bash
+pip install -e ".[yfinance]"
+```
+
+```python
+from gqaoa.problem import generate_yfinance_problem
+
+instance = generate_yfinance_problem(
+    tickers=["AAPL", "MSFT", "GOOGL", "AMZN"],
+    start_date="2022-01-01",
+    end_date="2025-01-01",
+)                                   # ring topology by default; pass topology="complete" too
+```
+
+`asset_names` preserves the order of `tickers` as given. If any ticker returns no usable
+data for the requested range, it raises `YFinanceDataError` naming the offending
+ticker(s) instead of silently proceeding with incomplete data.
+
+### The legacy fixed problem, as a `ProblemInstance`
+
+`legacy_problem_instance()` wraps the existing `f_return_cov()` + `RING_TOPOLOGY_EDGES`
+as a `ProblemInstance` (`problem_id="legacy-n10-fixed"`, `source="legacy_fixed"`) —
+purely additive, it doesn't change `data.py`/`config.py` or how `build_problem()` uses
+them today:
+
+```python
+from gqaoa.problem import legacy_problem_instance
+
+instance = legacy_problem_instance()
+```
+
+### Persisting problem instances
+
+`save_problem`/`load_problem` round-trip a `ProblemInstance` to/from
+`artifacts/problems/<problem_id>/problem.json`:
+
+```python
+from gqaoa.problem import save_problem, load_problem
+
+path = save_problem(instance)              # no-op if identical content is already there;
+                                            # raises if a *different* instance already
+                                            # exists under the same problem_id (pass
+                                            # overwrite=True to replace it deliberately)
+same_instance = load_problem(instance.problem_id)
+```
+
+`problem_id` is derived deterministically from the generation parameters (not the
+resulting numeric data), so re-running a generator with the same inputs (e.g. same
+`seed`, or same tickers/date range) always resolves to the same saved file instead of
+creating a duplicate.
+
+---
 
 The quantum backend (`lightning.gpu` in production, `default.qubit` in tests)
 is injected via `device_name` on every `run_job()` — see `domain/device.py`.
@@ -386,6 +485,7 @@ without needing a GPU.
 | `src/gqaoa/models/training.py` | `epoch_train()` — one training epoch |
 | `src/gqaoa/domain/qaoa.py` | QAOA circuit definition, QPU call counter |
 | `src/gqaoa/domain/data.py` | Expected returns + covariance matrix for the 10-asset problem |
+| `src/gqaoa/problem/` | `ProblemInstance` generation (synthetic/yfinance/legacy) + persistence — see "Generating problem instances" above |
 | `src/gqaoa/domain/compression.py` | SDP compression for the problem graph (skip via `--no-sdp`, see "SDP compression preprocessing" above) |
 | `src/gqaoa/experiments/bracket.py` | Unified bracket strategy (single run or repeated) |
 | `src/gqaoa/experiments/stability.py` | Unified repeated-run stability analysis (any strategy) |
