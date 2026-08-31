@@ -10,6 +10,5 @@ dist/
 .DS_Store
 
 # run artifacts — never committed, recreated on first run
-artifacts/*.db
-artifacts/checkpoints/
+artifacts/
 mlruns/
