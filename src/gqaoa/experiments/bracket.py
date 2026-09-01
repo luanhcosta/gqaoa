@@ -17,6 +17,12 @@ import shutil
 
 from gqaoa.config import BestKnownConfig, BEST_KNOWN_CONFIG, replace_training
 from gqaoa.paths import CHECKPOINTS_DIR
+from gqaoa.reporting.optimality import (
+    compare_runs_to_optimal,
+    compare_single_run_to_optimal,
+    derive_bitstring,
+    try_load_brute_force,
+)
 from gqaoa.reporting.stats import report_stats
 from gqaoa.strategies import gqaoa_strategy
 from gqaoa.tracking.mlflow_utils import init_mlflow
@@ -42,7 +48,7 @@ def _run_phase(
         checkpoint_in=checkpoint_in,
         checkpoint_out=ckpt_out,
     )
-    return result["final_exp_val"], ckpt_out
+    return result, ckpt_out
 
 
 def _run_one_bracket(bracket_id, ckpt_dir, base_config, device_name, run_name_prefix):
@@ -50,8 +56,9 @@ def _run_one_bracket(bracket_id, ckpt_dir, base_config, device_name, run_name_pr
 
     p1_results = []
     for i in range(N_PHASE1):
-        e, c = _run_phase("p1", i + 1, QPU_PHASE1, ckpt_dir, base_config, device_name,
-                           run_name_prefix, lr_T0=8, lr_T_mult=1)
+        result, c = _run_phase("p1", i + 1, QPU_PHASE1, ckpt_dir, base_config, device_name,
+                                run_name_prefix, lr_T0=8, lr_T_mult=1)
+        e = result["final_exp_val"]
         p1_results.append((e, c))
         print(f"  [bracket {bracket_id}] P1 run {i+1}/{N_PHASE1}: energy_min = {e:.6f}")
     p1_results.sort(key=lambda x: x[0])
@@ -59,17 +66,19 @@ def _run_one_bracket(bracket_id, ckpt_dir, base_config, device_name, run_name_pr
 
     p2_results = []
     for i, (_, ckpt_in) in enumerate(top_k):
-        e, c = _run_phase("p2", i + 1, QPU_PHASE2, ckpt_dir, base_config, device_name,
-                           run_name_prefix, checkpoint_in=ckpt_in, lr_T0=5, lr_T_mult=2)
+        result, c = _run_phase("p2", i + 1, QPU_PHASE2, ckpt_dir, base_config, device_name,
+                                run_name_prefix, checkpoint_in=ckpt_in, lr_T0=5, lr_T_mult=2)
+        e = result["final_exp_val"]
         p2_results.append((e, c))
         print(f"  [bracket {bracket_id}] P2 run {i+1}/{TOP_K}: energy_min = {e:.6f}")
     p2_results.sort(key=lambda x: x[0])
 
-    final_energy, _ = _run_phase("p3", 1, QPU_PHASE3, ckpt_dir, base_config, device_name,
+    final_result, _ = _run_phase("p3", 1, QPU_PHASE3, ckpt_dir, base_config, device_name,
                                   run_name_prefix, checkpoint_in=p2_results[0][1], lr_T0=5, lr_T_mult=2)
+    final_energy = final_result["final_exp_val"]
     print(f"  [bracket {bracket_id}] FINAL: energy_min = {final_energy:.6f}")
 
-    return final_energy, p1_results[0][0], p2_results[0][0]
+    return final_result, p1_results[0][0], p2_results[0][0]
 
 
 def run_bracket(
@@ -92,15 +101,20 @@ def run_bracket(
     print(f"Phase 2: top {TOP_K} x {QPU_PHASE2} QPU calls")
     print(f"Phase 3: top 1 x {QPU_PHASE3} QPU calls\n")
 
+    brute_force_result = try_load_brute_force(base_config.problem.problem_id)
+
     finals = []
+    probs_by_run = []
     for b in range(1, n_repetitions + 1):
         print(f"\n{'='*50}")
         print(f"BRACKET RUN {b}/{n_repetitions}")
         print(f"{'='*50}")
         ckpt_dir = os.path.join(CHECKPOINTS_DIR, "bracket", f"run{b}")
         run_name_prefix = f"bracket{b}_" if n_repetitions > 1 else "bracket_"
-        final_energy, p1_best, p2_best = _run_one_bracket(b, ckpt_dir, base_config, device_name, run_name_prefix)
+        final_result, p1_best, p2_best = _run_one_bracket(b, ckpt_dir, base_config, device_name, run_name_prefix)
+        final_energy = float(final_result["final_exp_val"])
         finals.append(final_energy)
+        probs_by_run.append(final_result.get("probs"))
 
         if n_repetitions == 1:
             print(f"\n{'='*50}")
@@ -109,10 +123,29 @@ def run_bracket(
             print(f"Phase 2 best     : {p2_best:.6f}")
             print(f"Improvement P1->P3: {p1_best - final_energy:+.6f}")
 
+            if brute_force_result is not None:
+                comparison = compare_single_run_to_optimal(
+                    final_energy, final_result.get("probs"), brute_force_result
+                )
+                print(f"\n{'='*50}")
+                print("Optimality comparison")
+                print(f"{'='*50}")
+                for k, v in comparison.items():
+                    print(f"  {k:24s}: {v}")
+
         if cleanup_checkpoints:
             shutil.rmtree(ckpt_dir, ignore_errors=True)
 
     if n_repetitions > 1:
         report_stats(finals, f"Bracket stability — {n_repetitions} bracket runs, {TOTAL_QPU_CALLS_PER_BRACKET} QPU calls each")
+
+        if brute_force_result is not None:
+            bitstrings = [derive_bitstring(probs) for probs in probs_by_run]
+            optimality = compare_runs_to_optimal(bitstrings, finals, brute_force_result)
+            print(f"\n{'='*50}")
+            print(f"Optimality comparison — {n_repetitions} bracket runs")
+            print(f"{'='*50}")
+            for k, v in optimality.items():
+                print(f"  {k:28s}: {v}")
 
     return finals

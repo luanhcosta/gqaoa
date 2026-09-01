@@ -3,8 +3,10 @@ import argparse
 
 from gqaoa.cli._common import (
     add_model_override_args,
+    add_problem_id_arg,
     add_sdp_override_args,
     apply_model_overrides,
+    apply_problem_id,
     apply_sdp_override,
 )
 from gqaoa.config import BEST_KNOWN_CONFIG
@@ -19,6 +21,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
                          help="Keep checkpoints/bracket/... after each run instead of deleting them")
     add_model_override_args(parser)
     add_sdp_override_args(parser)
+    add_problem_id_arg(parser)
     return parser
 
 
@@ -26,6 +29,7 @@ def main(argv=None) -> None:
     args = build_arg_parser().parse_args(argv)
     config = apply_model_overrides(BEST_KNOWN_CONFIG, args)
     config = apply_sdp_override(config, args)
+    config = apply_problem_id(config, args)
     run_bracket(
         n_repetitions=args.n_repetitions,
         cleanup_checkpoints=not args.no_cleanup_checkpoints,

@@ -53,3 +53,39 @@ def apply_sdp_override(config: BestKnownConfig, args: argparse.Namespace) -> Bes
     if not args.no_sdp:
         return config
     return dataclasses.replace(config, problem=dataclasses.replace(config.problem, sdp=False))
+
+
+def add_problem_id_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--problem-id", default=None,
+        help="Load a persisted problem (see gqaoa.problem.store.save_problem) by its "
+             "problem_id and use it instead of the fixed 10-asset portfolio problem. "
+             "Default: unchanged (fixed problem).",
+    )
+
+
+def apply_problem_id(config: BestKnownConfig, args: argparse.Namespace) -> BestKnownConfig:
+    """Swap in a persisted problem when --problem-id is given; no-op otherwise.
+
+    Also overrides problem.edges_hc/edges_hb with the loaded instance's own
+    topology: gqaoa_strategy/gradient_descent_strategy/scipy_strategy all build
+    their QAOA instance straight from `problem.edges_hc`/`problem.edges_hb`
+    (build_problem() only returns expected_value/cov_matrix/lambda_sdp, not
+    edges), so this is the only place that can correct the topology for a
+    persisted problem whose asset count differs from the config's fixed
+    RING_TOPOLOGY_EDGES (10 nodes).
+    """
+    if args.problem_id is None:
+        return config
+    from gqaoa.problem.store import load_problem
+
+    instance = load_problem(args.problem_id)
+    return dataclasses.replace(
+        config,
+        problem=dataclasses.replace(
+            config.problem,
+            problem_id=args.problem_id,
+            edges_hc=list(instance.edges_hc),
+            edges_hb=list(instance.edges_hb),
+        ),
+    )

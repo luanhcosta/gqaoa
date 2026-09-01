@@ -7,8 +7,10 @@ import dataclasses
 
 from gqaoa.cli._common import (
     add_model_override_args,
+    add_problem_id_arg,
     add_sdp_override_args,
     apply_model_overrides,
+    apply_problem_id,
     apply_sdp_override,
 )
 from gqaoa.config import BEST_KNOWN_CONFIG, NO_ANNEAL_CONFIG
@@ -27,6 +29,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     add_model_override_args(parser)
     add_sdp_override_args(parser)
+    add_problem_id_arg(parser)
     return parser
 
 
@@ -39,6 +42,7 @@ def main(argv=None) -> None:
     )
     config = apply_model_overrides(config, args)
     config = apply_sdp_override(config, args)
+    config = apply_problem_id(config, args)
     anneal_label = "no_anneal" if args.no_annealing else "anneal"
     run_stability(
         strategy="gqaoa",

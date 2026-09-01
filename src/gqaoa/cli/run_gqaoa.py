@@ -1,7 +1,9 @@
 """Single GQAOA dev-run — thin CLI wrapper around gqaoa_strategy.run_job."""
 import argparse
 
-from gqaoa.config import ModelConfig, ProblemConfig, RING_TOPOLOGY_EDGES, TrainingConfig
+from gqaoa.cli._common import add_problem_id_arg, apply_problem_id
+from gqaoa.config import BestKnownConfig, ModelConfig, ProblemConfig, RING_TOPOLOGY_EDGES, TrainingConfig
+from gqaoa.reporting.optimality import compare_single_run_to_optimal, try_load_brute_force
 from gqaoa.strategies import gqaoa_strategy
 from gqaoa.tracking.mlflow_utils import init_mlflow
 
@@ -19,6 +21,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device-name", default="lightning.gpu")
     parser.add_argument("--no-sdp", action="store_true",
                          help="Skip the SDP compression preprocessing step (default: enabled)")
+    add_problem_id_arg(parser)
     return parser
 
 
@@ -42,11 +45,22 @@ def main(argv=None) -> None:
         limit_qpu_call=args.limit_qpu_call,
     )
 
+    config = apply_problem_id(BestKnownConfig(problem=problem, model=model, training=training), args)
+
     result = gqaoa_strategy.run_job(
-        problem, training, model,
+        config.problem, config.training, config.model,
         device_name=args.device_name, run_name=args.run_name,
     )
     print(result)
+
+    brute_force_result = try_load_brute_force(config.problem.problem_id)
+    if brute_force_result is not None:
+        comparison = compare_single_run_to_optimal(result["final_exp_val"], result["probs"], brute_force_result)
+        print(f"\n{'='*45}")
+        print("Optimality comparison")
+        print(f"{'='*45}")
+        for k, v in comparison.items():
+            print(f"  {k:24s}: {v}")
 
 
 if __name__ == "__main__":

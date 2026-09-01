@@ -24,6 +24,12 @@ class ProblemConfig:
     edges_hc: list | None = None
     edges_hb: list | None = None
     sdp: bool = False
+    # Optional id of a persisted `gqaoa.problem.ProblemInstance` (see
+    # `gqaoa.problem.store.load_problem`). When None (default), build_problem()
+    # keeps using the fixed 10-asset f_return_cov() problem — 100% unchanged
+    # behavior. When set, build_problem() loads that instance's
+    # expected_value/cov_matrix instead.
+    problem_id: str | None = None
 
 
 @dataclass
