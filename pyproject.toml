@@ -33,6 +33,7 @@ gqaoa-bracket = "gqaoa.cli.run_bracket:main"
 gqaoa-stability-bracket = "gqaoa.cli.run_stability_bracket:main"
 gqaoa-benchmark-gd = "gqaoa.cli.run_benchmark_gd:main"
 gqaoa-benchmark-scipy = "gqaoa.cli.run_benchmark_scipy:main"
+gqaoa-brute-force = "gqaoa.cli.run_brute_force:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
