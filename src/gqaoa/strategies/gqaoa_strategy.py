@@ -15,7 +15,7 @@ from gqaoa.domain.qaoa import QAOA
 from gqaoa.models.gpt_qaoa import GPT2_QAOA
 from gqaoa.models.training import epoch_train
 from gqaoa.strategies.base import StrategyResult
-from gqaoa.strategies.common import beta_temp_schedule, build_problem
+from gqaoa.strategies.common import build_problem
 
 logging.basicConfig(level=logging.INFO)
 
@@ -58,8 +58,6 @@ def run_job(
             "lr_T0": training.lr_T0,
             "lr_T_mult": training.lr_T_mult,
             "checkpoint_in": str(checkpoint_in),
-            "beta_temp_max": training.beta_temp_max if training.beta_temp_max is not None else training.beta_temp,
-            "beta_temp_anneal_frac": training.beta_temp_anneal_frac,
             "init_scale": training.init_scale,
         })
 
@@ -112,8 +110,6 @@ def run_job(
             logging.info(f'Loaded checkpoint from {checkpoint_in} (prev energy_min={ckpt.get("energy_min", "?")})')
 
         for i in range(training.limit_epochs):
-            beta_temp_current = beta_temp_schedule(training, qaoa.count_qpu_call)
-
             (
              loss0,
              loss_log_pr_beta_temp_item,
@@ -142,7 +138,7 @@ def run_job(
                             nn_qaoa,
                             qnode_cost_function,
                             optimizer,
-                            beta_temp_current,
+                            training.beta_temp,
                             training.depth,
                             df_hist=df_hist,
                             full_input_ids_energy_min=full_input_ids_energy_min,
@@ -181,7 +177,6 @@ def run_job(
                 mlflow.log_metric("log_pr_ids_beta_temp_random", log_pr_ids_beta_temp_random_item, step=i)
                 mlflow.log_metric("count_qpu_call", qaoa.count_qpu_call, step=i)
                 mlflow.log_metric("lr", scheduler.get_last_lr()[0], step=i)
-                mlflow.log_metric("beta_temp_current", beta_temp_current, step=i)
             except Exception as exc:
                 # A transient MLflow/SQLite hiccup (e.g. lock contention with a
                 # concurrently running `mlflow ui`) shouldn't discard an entire

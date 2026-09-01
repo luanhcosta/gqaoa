@@ -12,8 +12,8 @@ def _isolated_mlflow_tracking(tmp_path, monkeypatch):
     test_uri = f"sqlite:///{tmp_path}/mlflow-test.db"
     mlflow.set_tracking_uri(test_uri)
 
-    # gqaoa.tracking.mlflow_utils.init_mlflow() (used by the bracket/stability
-    # experiments) hardcodes the real artifacts/mlflow.db path and would
+    # gqaoa.tracking.mlflow_utils.init_mlflow() (used by the experiment
+    # modules) hardcodes the real artifacts/mlflow.db path and would
     # override the line above, so redirect it too.
     monkeypatch.setattr("gqaoa.tracking.mlflow_utils.MLFLOW_TRACKING_URI", test_uri)
     monkeypatch.setattr("gqaoa.tracking.mlflow_utils.ARTIFACTS_DIR", tmp_path)

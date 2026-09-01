@@ -1,6 +1,6 @@
 import argparse
 
-from gqaoa.cli import run_bracket, run_hpo, run_stability_bracket, run_stability_check
+from gqaoa.cli import run_hpo, run_stability_check
 from gqaoa.cli._common import add_model_override_args, apply_model_overrides
 from gqaoa.config import BEST_KNOWN_CONFIG
 
@@ -40,40 +40,6 @@ def test_stability_check_cli_exposes_model_override_flags():
     assert args.n_head is None
 
 
-def test_bracket_cli_threads_model_override_into_run_bracket(monkeypatch):
-    captured = {}
-
-    def fake_run_bracket(**kwargs):
-        captured.update(kwargs)
-        return []
-
-    monkeypatch.setattr(run_bracket, "run_bracket", fake_run_bracket)
-
-    run_bracket.main(["--device-name", "default.qubit", "--n-layer", "1", "--vocab-size", "4"])
-
-    assert captured["base_config"].model.n_layer == 1
-    assert captured["base_config"].model.vocab_size == 4
-    assert captured["device_name"] == "default.qubit"
-
-
-def test_stability_bracket_cli_threads_model_override_into_run_bracket(monkeypatch):
-    captured = {}
-
-    def fake_run_bracket(**kwargs):
-        captured.update(kwargs)
-        return []
-
-    monkeypatch.setattr(run_stability_bracket, "run_bracket", fake_run_bracket)
-
-    run_stability_bracket.main(
-        ["--device-name", "default.qubit", "--n-repetitions", "2", "--n-layer", "1", "--vocab-size", "4"]
-    )
-
-    assert captured["n_repetitions"] == 2
-    assert captured["base_config"].model.n_layer == 1
-    assert captured["base_config"].model.vocab_size == 4
-
-
 def test_hpo_cli_exposes_and_threads_limit_flags(monkeypatch):
     captured = {}
 
@@ -99,11 +65,6 @@ def test_hpo_cli_default_limits_match_objective_defaults():
     assert args.limit_qpu_call == 200
 
 
-def test_stability_check_cli_default_uses_annealing():
-    args = run_stability_check.build_arg_parser().parse_args([])
-    assert args.no_annealing is False
-
-
 def test_stability_check_cli_default_threads_best_known_config(monkeypatch):
     captured = {}
 
@@ -114,20 +75,5 @@ def test_stability_check_cli_default_threads_best_known_config(monkeypatch):
     monkeypatch.setattr(run_stability_check, "run_stability", fake_run_stability)
     run_stability_check.main(["--limit-qpu-call", "50"])
 
-    assert captured["base_config"].training.beta_temp_max == 4.0
-    assert captured["run_name_prefix"] == "stability_anneal_50"
-
-
-def test_stability_check_cli_no_annealing_flag_threads_no_anneal_config(monkeypatch):
-    captured = {}
-
-    def fake_run_stability(**kwargs):
-        captured.update(kwargs)
-        return [], {}
-
-    monkeypatch.setattr(run_stability_check, "run_stability", fake_run_stability)
-    run_stability_check.main(["--no-annealing", "--n-runs", "1", "--limit-qpu-call", "50"])
-
-    assert captured["base_config"].training.beta_temp_max is None
-    assert captured["run_name_prefix"] == "stability_no_anneal_50"
-    assert captured["n_runs"] == 1
+    assert captured["base_config"].training.beta_temp == BEST_KNOWN_CONFIG.training.beta_temp
+    assert captured["run_name_prefix"] == "stability_50"

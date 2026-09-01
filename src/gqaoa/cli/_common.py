@@ -1,13 +1,13 @@
 """Shared argparse helpers for CLIs built on BEST_KNOWN_CONFIG.
 
-Extracted because run_stability_check.py, run_bracket.py, and
-run_stability_bracket.py all need the same optional model-size override
-flags: BEST_KNOWN_CONFIG hardcodes the "full" GPT2 architecture
-(n_embd=768, n_layer=12, n_head=12) with no way to shrink it, which makes
-these three experiments impractical to sanity-check on CPU (the transformer
-forward/backward pass dominates cost, not the QAOA circuit itself, so
-lowering --limit-qpu-call alone doesn't help). These flags are opt-in
-overrides only — omitting them keeps BEST_KNOWN_CONFIG's model unchanged.
+Extracted because run_stability_check.py and other experiment CLIs all need
+the same optional model-size override flags: BEST_KNOWN_CONFIG hardcodes the
+"full" GPT2 architecture (n_embd=768, n_layer=12, n_head=12) with no way to
+shrink it, which makes these experiments impractical to sanity-check on CPU
+(the transformer forward/backward pass dominates cost, not the QAOA circuit
+itself, so lowering --limit-qpu-call alone doesn't help). These flags are
+opt-in overrides only — omitting them keeps BEST_KNOWN_CONFIG's model
+unchanged.
 """
 import argparse
 import dataclasses

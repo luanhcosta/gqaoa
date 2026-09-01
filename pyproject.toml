@@ -29,8 +29,6 @@ dev = ["pytest>=8.0", "pytest-cov", "ruff"]
 gqaoa-run = "gqaoa.cli.run_gqaoa:main"
 gqaoa-hpo = "gqaoa.cli.run_hpo:main"
 gqaoa-stability-check = "gqaoa.cli.run_stability_check:main"
-gqaoa-bracket = "gqaoa.cli.run_bracket:main"
-gqaoa-stability-bracket = "gqaoa.cli.run_stability_bracket:main"
 gqaoa-benchmark-gd = "gqaoa.cli.run_benchmark_gd:main"
 gqaoa-benchmark-scipy = "gqaoa.cli.run_benchmark_scipy:main"
 gqaoa-brute-force = "gqaoa.cli.run_brute_force:main"

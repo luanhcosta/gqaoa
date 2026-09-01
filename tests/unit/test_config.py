@@ -1,8 +1,6 @@
-import dataclasses
-
 import networkx as nx
 
-from gqaoa.config import BEST_KNOWN_CONFIG, NO_ANNEAL_CONFIG, RING_TOPOLOGY_EDGES
+from gqaoa.config import BEST_KNOWN_CONFIG, RING_TOPOLOGY_EDGES
 
 
 def test_ring_topology_is_a_single_10_node_cycle():
@@ -28,15 +26,4 @@ def test_best_known_config_matches_documented_values():
     assert BEST_KNOWN_CONFIG.training.depth == 5
     assert BEST_KNOWN_CONFIG.training.optimizer_lr == 3.86e-4
     assert BEST_KNOWN_CONFIG.training.beta_temp == 0.7817
-    assert BEST_KNOWN_CONFIG.training.beta_temp_max == 4.0
-    assert BEST_KNOWN_CONFIG.training.beta_temp_anneal_frac == 0.8
     assert BEST_KNOWN_CONFIG.training.init_scale == 0.1
-
-
-def test_no_anneal_config_disables_annealing_only():
-    assert NO_ANNEAL_CONFIG.training.beta_temp_max is None
-    assert NO_ANNEAL_CONFIG.problem == BEST_KNOWN_CONFIG.problem
-    assert NO_ANNEAL_CONFIG.model == BEST_KNOWN_CONFIG.model
-    assert dataclasses.replace(
-        NO_ANNEAL_CONFIG.training, beta_temp_max=BEST_KNOWN_CONFIG.training.beta_temp_max
-    ) == BEST_KNOWN_CONFIG.training

@@ -4,10 +4,8 @@ import dataclasses
 from gqaoa.cli import (
     run_benchmark_gd,
     run_benchmark_scipy,
-    run_bracket,
     run_gqaoa,
     run_hpo,
-    run_stability_bracket,
     run_stability_check,
 )
 from gqaoa.cli._common import add_sdp_override_args, apply_sdp_override
@@ -37,34 +35,6 @@ def test_apply_sdp_override_no_sdp_flag_disables_sdp():
     assert config.problem == dataclasses.replace(BEST_KNOWN_CONFIG.problem, sdp=False)
     # original config is untouched (dataclasses.replace returns a copy)
     assert BEST_KNOWN_CONFIG.problem.sdp is True
-
-
-def test_bracket_cli_no_sdp_flag_threads_into_run_bracket(monkeypatch):
-    captured = {}
-
-    def fake_run_bracket(**kwargs):
-        captured.update(kwargs)
-        return []
-
-    monkeypatch.setattr(run_bracket, "run_bracket", fake_run_bracket)
-
-    run_bracket.main(["--device-name", "default.qubit", "--no-sdp"])
-
-    assert captured["base_config"].problem.sdp is False
-
-
-def test_stability_bracket_cli_no_sdp_flag_threads_into_run_bracket(monkeypatch):
-    captured = {}
-
-    def fake_run_bracket(**kwargs):
-        captured.update(kwargs)
-        return []
-
-    monkeypatch.setattr(run_stability_bracket, "run_bracket", fake_run_bracket)
-
-    run_stability_bracket.main(["--device-name", "default.qubit", "--n-repetitions", "1", "--no-sdp"])
-
-    assert captured["base_config"].problem.sdp is False
 
 
 def test_stability_check_cli_no_sdp_flag_threads_into_run_stability(monkeypatch):

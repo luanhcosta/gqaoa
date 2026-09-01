@@ -39,7 +39,6 @@ mlflow ui --backend-store-uri sqlite:///artifacts/mlflow.db --allowed-hosts '*' 
 | Experiment | MLflow experiment name |
 |---|---|
 | Stability check (main experiment) | `gqaoa-stability` |
-| Bracket strategy | `gqaoa-bracket` |
 | HPO | `gqaoa-hpo` |
 | Benchmark (classical GD baseline) | `gqaoa-benchmark-gd` |
 | Benchmark (classical scipy baseline) | `gqaoa-benchmark-scipy` |
@@ -73,13 +72,13 @@ pip install -e ".[dev]"          # no need for the gpu extra at all
   CPU is fine even at the full 1000-call budget (e.g. `gqaoa-benchmark-gd --device-name
   default.qubit --n-runs 3` or `gqaoa-benchmark-scipy --device-name default.qubit
   --n-runs 3` both run in seconds per run).
-- **`gqaoa-stability-check`, `gqaoa-bracket`, `gqaoa-stability-bracket`, `gqaoa-hpo`**,
-  *if you also shrink the model* — all four use `BEST_KNOWN_CONFIG`'s "full" GPT2
+- **`gqaoa-stability-check`, `gqaoa-hpo`**,
+  *if you also shrink the model* — both use `BEST_KNOWN_CONFIG`'s "full" GPT2
   architecture (`n_embd=768, n_layer=12, n_head=12`) by default, and on CPU the
   transformer forward/backward pass dominates cost, not the QAOA circuit, so
   lowering `--limit-qpu-call` alone does **not** help (confirmed:
   `gqaoa-stability-check --limit-qpu-call 5` alone didn't finish within a
-  minute). Each of the four now also accepts `--vocab-size`/`--n-embd`/
+  minute). Each of the two also accepts `--vocab-size`/`--n-embd`/
   `--n-layer`/`--n-head` overrides (default: unchanged, so full-budget GPU runs
   are unaffected) — e.g. `gqaoa-stability-check --device-name default.qubit
   --n-layer 1 --vocab-size 4 --n-runs 1 --limit-qpu-call 5` completes in ~8s.
@@ -101,7 +100,11 @@ pip install -e ".[dev]"          # no need for the gpu extra at all
 
 Minimize `energy_min` — the ground state energy of a QUBO/Ising Hamiltonian for a 10-asset portfolio optimization problem.
 
-- **Best known value:** -0.795 (GQAOA + annealing, 1000 QPU calls)
+- **Historical best known value:** -0.795 (GQAOA with a `beta_temp` cosine-annealing
+  schedule, 1000 QPU calls). That annealing schedule (and the `bracket` warm-restart
+  experiment) has since been removed from this codebase — `beta_temp` is now held
+  constant for the whole run, so this value is not necessarily reproducible with the
+  current strategy and has not been re-measured under it.
 - **QPU calls** are the real cost metric — each circuit evaluation on the simulator counts as one call
 - **Graph:** 10-node ring — `gqaoa.config.RING_TOPOLOGY_EDGES`
 - **Fixed params:** `q=0.3, B=5, lamb=0, sdp=True, initial_state=dicke_state, mixture_layer=xy`
@@ -118,9 +121,7 @@ vocab_size             = 20
 n_embd                 = 768
 n_layer                = 12
 n_head                 = 12
-beta_temp              = 0.7817   # final value after annealing
-beta_temp_max          = 4.0      # starting value (None = no annealing, see NO_ANNEAL_CONFIG)
-beta_temp_anneal_frac  = 0.8      # fraction of QPU budget spent annealing
+beta_temp              = 0.7817   # constant sampling temperature
 init_scale             = 0.1
 depth                  = 5
 ```
@@ -137,7 +138,7 @@ src/gqaoa/
 ├── problem/        # ProblemInstance generation (synthetic/yfinance/legacy) + persistence, incl. brute-force results
 ├── models/         # GPT2_QAOA model + epoch_train training loop
 ├── strategies/      # the 3 optimizer strategies behind a common run_job() interface
-├── experiments/     # bracket (warm-restart), stability (repeated-run stats), hpo
+├── experiments/     # stability (repeated-run stats), hpo
 ├── tracking/        # MLflow init helper
 ├── reporting/        # report_stats(), optimality comparison against a persisted brute-force result
 └── cli/             # thin argparse entry points, one per experiment below (incl. gqaoa-brute-force)
@@ -157,8 +158,8 @@ minimize `energy_min`, the energy of the QAOA cost Hamiltonian — but choose th
 circuit's angle parameters (γ, β) in different ways. They share a common
 `run_job(problem, training, ..., device_name, run_name, checkpoint_in,
 checkpoint_out)` signature (`strategies/base.py::OptimizerStrategy`), which is
-what lets `experiments/bracket.py` and `experiments/stability.py` dispatch to
-any of them through a simple registry instead of duplicating logic per strategy.
+what lets `experiments/stability.py` dispatch to any of them through a simple
+registry instead of duplicating logic per strategy.
 
 - **`gqaoa_strategy.py` — the neural-sampler strategy (the project's main idea).**
   Instead of optimizing the QAOA angles directly, trains a GPT2 model
@@ -170,7 +171,8 @@ any of them through a simple registry instead of duplicating logic per strategy.
   different "temperatures" (`beta_temp`, `-beta_temp`, near-random, replay of
   the best minimum, replay of the best maximum) to explore the search space.
   It's the only strategy that supports checkpointing (saving/loading model
-  weights), which is what the bracket strategy relies on for warm restarts.
+  weights via `checkpoint_in`/`checkpoint_out`), though no experiment
+  currently threads checkpoints between runs.
 
 - **`gradient_descent_strategy.py` — classical baseline #1.** PennyLane's
   `GradientDescentOptimizer` with `diff_method="spsa"` (a stochastic
@@ -213,8 +215,6 @@ solver:
 gqaoa-run --no-sdp
 gqaoa-hpo --no-sdp
 gqaoa-stability-check --no-sdp
-gqaoa-bracket --no-sdp
-gqaoa-stability-bracket --no-sdp
 gqaoa-benchmark-gd --no-sdp
 gqaoa-benchmark-scipy --no-sdp
 ```
@@ -320,8 +320,8 @@ overwrite=True)`) — or, from any CLI below, `--overwrite`.
 
 ### Reusing a `problem_id` across experiments
 
-Every experiment CLI (`gqaoa-run`, `gqaoa-stability-check`, `gqaoa-bracket`,
-`gqaoa-stability-bracket`, `gqaoa-benchmark-gd`, `gqaoa-benchmark-scipy`) accepts `--problem-id <id>`
+Every experiment CLI (`gqaoa-run`, `gqaoa-stability-check`, `gqaoa-benchmark-gd`,
+`gqaoa-benchmark-scipy`) accepts `--problem-id <id>`
 to swap in a persisted problem instead of the fixed 10-asset problem. Without it, behavior is
 exactly as it is today (fixed problem, zero regression) — see "Experiments" below for what changes
 once you do pass it.
@@ -350,15 +350,15 @@ Each experiment below is a thin CLI (`src/gqaoa/cli/`) built on top of
 `src/gqaoa/experiments/`, combining or repeating the strategies above to
 answer a different question.
 
-Items 1 and 3–7 (all but HPO) accept `--problem-id <id>` to run against a problem persisted via
+Items 1 and 3–5 (all but HPO) accept `--problem-id <id>` to run against a problem persisted via
 `gqaoa.problem`/`gqaoa-brute-force` (see "Problem generation" above) instead of the fixed 10-asset
 problem. **Without `--problem-id`, behavior is exactly what it is today — zero regression.** When
 `--problem-id` is given *and* a `brute_force.json` has been persisted for it, the run's report grows
 an "Optimality comparison" block (`gqaoa.reporting.optimality`): the energy gap against the known
 optimum, whether that optimum was actually reached (within a `1e-6` numerical tolerance), and how the
-found bitstring compares to the optimal one. For the multi-run experiments (item 3, item 5 with
-`--n-repetitions` > 1, items 6–7) this also includes the mode of the bitstrings found across runs and
-its count, plus the fraction of runs that reached the optimum.
+found bitstring compares to the optimal one. For the multi-run experiments (item 3, items 4–5) this
+also includes the mode of the bitstrings found across runs and its count, plus the fraction of runs
+that reached the optimum.
 
 ### 1. GQAOA dev-run (single training run)
 
@@ -392,62 +392,16 @@ across independent runs. Results go to `gqaoa-stability`.
 gqaoa-stability-check --n-runs 10 --limit-qpu-call 1000
 ```
 
-Uses `BEST_KNOWN_CONFIG` by default (annealing: `beta_temp_max=4.0`, `beta_temp_anneal_frac=0.8`,
-`init_scale=0.1`). `--vocab-size`/`--n-embd`/`--n-layer`/`--n-head` override the model architecture
-(e.g. for a CPU smoke run — see "Running without a GPU" above); omit them to keep the full
-architecture unchanged.
+Uses `BEST_KNOWN_CONFIG` by default (`beta_temp=0.7817` held constant, `init_scale=0.1`).
+`--vocab-size`/`--n-embd`/`--n-layer`/`--n-head` override the model architecture (e.g. for a CPU
+smoke run — see "Running without a GPU" above); omit them to keep the full architecture unchanged.
 
-Pass `--no-annealing` to run the same config with `beta_temp` held constant instead (via
-`gqaoa.config.NO_ANNEAL_CONFIG` — identical to `BEST_KNOWN_CONFIG` except `beta_temp_max=None`),
-reproducing the "Baseline (no annealing)" row below and letting you measure annealing's actual
-contribution. A single isolated run is just `--n-runs 1`:
+> This experiment previously also supported a `--no-annealing` ablation flag that compared a
+> `beta_temp` cosine-annealing schedule against a constant-temperature baseline. That schedule
+> (and its results table) has been removed along with the `bracket` warm-restart experiment;
+> `beta_temp` is now always constant.
 
-```bash
-gqaoa-stability-check --no-annealing --n-runs 10 --limit-qpu-call 1000   # ablation, N runs
-gqaoa-stability-check --no-annealing --n-runs 1  --limit-qpu-call 1000   # ablation, 1 isolated run
-```
-
-Both modes log to the same `gqaoa-stability` experiment — the `stability_anneal_*`/
-`stability_no_anneal_*` run-name prefix and the `stability_summary` run's `beta_temp_max` param
-(`None` vs `4.0`) tell them apart for side-by-side comparison in the MLflow UI.
-
-**Statistical results by configuration** (from the original project's runs):
-
-| Config | N | mean | std | min |
-|---|---|---|---|---|
-| Baseline (no annealing), 200 calls | 10 | -0.491 | 0.108 | -0.750 |
-| Annealing, 200 calls | 10 | -0.491 | 0.030 | -0.549 |
-| Annealing, 500 calls | 5 | -0.564 | 0.022 | -0.586 |
-| Annealing, 1000 calls | 20 | -0.629 | 0.107 | **-0.795** |
-
-### 4. Bracket Strategy (single run)
-
-Multi-phase warm-restart exploration on top of the gqaoa strategy: 10 diverse runs of 80 calls each
-(Phase 1) → the 3 best continue for 50 more calls each, resuming from checkpoint (Phase 2) → the best
-of those continues for 50 more calls (Phase 3). Same total budget as the stability check (1000 QPU
-calls), but spends it exploring broadly before committing to refining the most promising candidates.
-Results go to `gqaoa-bracket`.
-
-```bash
-gqaoa-bracket
-```
-
-Budget: 10×80 + 3×50 + 50 = **1000 QPU calls**. Checkpoints are written to
-`artifacts/checkpoints/bracket/` and deleted after each run by default
-(`--no-cleanup-checkpoints` to keep them). Same `--vocab-size`/`--n-embd`/`--n-layer`/`--n-head`
-overrides as the stability check are available here too.
-
-### 5. Bracket Stability (bracket repeated N times)
-
-Runs the full bracket strategy (item 4) N times back-to-back, to check whether the bracket approach
-itself is consistent or has high variance across independent executions — the bracket-strategy
-equivalent of item 3's stability check.
-
-```bash
-gqaoa-stability-bracket --n-repetitions 3
-```
-
-### 6. Benchmark — Gradient Descent (classical baseline)
+### 4. Benchmark — Gradient Descent (classical baseline)
 
 Runs the classical `gradient_descent_strategy` (PennyLane `GradientDescentOptimizer` + SPSA) N times
 with the same QPU-call budget as the stability check, as the "does the neural sampler actually help?"
@@ -462,10 +416,10 @@ gqaoa-benchmark-gd --n-runs 10 --limit-qpu-call 1000
 `gradient_descent_strategy.py` note above), so it directly bounds the real cost with no risk of
 overrun.
 
-### 7. Benchmark — scipy (classical baseline)
+### 5. Benchmark — scipy (classical baseline)
 
 Runs the classical `scipy_strategy` (`scipy.optimize.minimize`) N times, the same "does the
-neural sampler actually help?" comparison as item 6, for whichever `scipy.optimize.minimize`
+neural sampler actually help?" comparison as item 4, for whichever `scipy.optimize.minimize`
 algorithm you pass via `--minimize-method` (e.g. `COBYLA`, `Nelder-Mead`, `Powell`, `CG`, `BFGS`,
 `L-BFGS-B`, `TNC`, `SLSQP`, `trust-constr` — see
 [scipy's docs](https://docs.scipy.org/doc/scipy/reference/optimize.minimize-neldermead.html) for
@@ -490,7 +444,7 @@ through, since it's specific to the scipy strategy and isn't a `TrainingConfig` 
 strategy-specific CLI flag (for a new strategy, or a new scipy option) can reuse the same
 mechanism instead of growing `TrainingConfig`.
 
-### 8. Brute-force ground-state search (`gqaoa-brute-force`)
+### 6. Brute-force ground-state search (`gqaoa-brute-force`)
 
 Exhaustively evaluates the classical QAOA cost-Hamiltonian energy (`domain/brute_force.py`) over
 candidate bitstrings and returns the true minimizer — a validation utility to check what any of the
@@ -532,12 +486,12 @@ optimality comparison described above.
 
 ```bash
 pytest                    # unit + integration (fast, no GPU needed) — default
-pytest -m slow            # includes slow smoke tests (a real HPO trial, a real bracket run)
+pytest -m slow            # includes slow smoke tests (a real HPO trial)
 pytest -m gpu             # includes the real lightning.gpu test (requires an NVIDIA GPU)
 ```
 
 Unit tests cover pure logic (Hamiltonian coefficients, config/data shapes,
-`report_stats`, bracket QPU-call budgets). Integration tests run each of the 3
+`report_stats`). Integration tests run each of the 3
 strategies end-to-end on the CPU `default.qubit` simulator with tiny
 `depth`/`limit_epochs`/`limit_qpu_call`, so the whole pipeline is exercised
 without needing a GPU.
@@ -548,7 +502,7 @@ without needing a GPU.
 
 | File | Role |
 |---|---|
-| `src/gqaoa/strategies/gqaoa_strategy.py` | Neural-sampler strategy — `run_job()` used by stability check, bracket, HPO |
+| `src/gqaoa/strategies/gqaoa_strategy.py` | Neural-sampler strategy — `run_job()` used by stability check, HPO |
 | `src/gqaoa/strategies/gradient_descent_strategy.py` | Classical baseline #1 (PennyLane GD + SPSA) |
 | `src/gqaoa/strategies/scipy_strategy.py` | Classical baseline #2 (scipy.optimize) |
 | `src/gqaoa/models/gpt_qaoa.py` | GPT2-based QAOA parameter sampler |
@@ -556,15 +510,14 @@ without needing a GPU.
 | `src/gqaoa/domain/qaoa.py` | QAOA circuit definition, QPU call counter |
 | `src/gqaoa/domain/data.py` | Expected returns + covariance matrix for the 10-asset problem |
 | `src/gqaoa/problem/` | `ProblemInstance` generation (synthetic/yfinance/legacy) + persistence, incl. brute-force results — see "Problem generation" above |
-| `src/gqaoa/domain/brute_force.py` | Classical cost-Hamiltonian energy + exact/fixed-cardinality search — see item 8 above |
+| `src/gqaoa/domain/brute_force.py` | Classical cost-Hamiltonian energy + exact/fixed-cardinality search — see item 6 above |
 | `src/gqaoa/reporting/optimality.py` | Compares a run's result against a persisted brute-force optimum — see "Experiments" above |
-| `src/gqaoa/cli/run_brute_force.py` | `gqaoa-brute-force` CLI — see item 8 above |
+| `src/gqaoa/cli/run_brute_force.py` | `gqaoa-brute-force` CLI — see item 6 above |
 | `src/gqaoa/domain/compression.py` | SDP compression for the problem graph (skip via `--no-sdp`, see "SDP compression preprocessing" above) |
-| `src/gqaoa/experiments/bracket.py` | Unified bracket strategy (single run or repeated) |
 | `src/gqaoa/experiments/stability.py` | Unified repeated-run stability analysis (any strategy) |
 | `src/gqaoa/experiments/hpo.py` | Optuna HPO search |
 | `artifacts/mlflow.db`, `artifacts/optuna.db` | Tracking databases (gitignored, created on first run) |
-| `artifacts/checkpoints/` | Model checkpoints for bracket warm restarts (gitignored) |
+| `artifacts/checkpoints/` | Model checkpoints via `checkpoint_in`/`checkpoint_out` (gitignored, currently unused by any experiment) |
 | `artifacts/problems/` | Persisted `ProblemInstance`s + brute-force results (gitignored) — see "Problem generation" above |
 
 ## Key parameters (`TrainingConfig`, `src/gqaoa/config.py`)
@@ -572,9 +525,7 @@ without needing a GPU.
 | Parameter | Description |
 |---|---|
 | `limit_qpu_call` | Hard stop on QPU evaluations (main cost knob) |
-| `beta_temp` | Final sampling temperature (lower = more greedy) |
-| `beta_temp_max` | Starting temperature for annealing (`None` = no annealing) |
-| `beta_temp_anneal_frac` | Fraction of QPU budget used for annealing (0.0–1.0) |
+| `beta_temp` | Constant sampling temperature (lower = more greedy) |
 | `init_scale` | Multiplier on initial model weights (`1.0` = PyTorch default, `0.1` = near-uniform sampling) |
 | `lr_T0` | Cosine warm restart period in epochs |
 | `lr_T_mult` | Period multiplier after each restart |

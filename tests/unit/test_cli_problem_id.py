@@ -2,7 +2,7 @@ import argparse
 
 import pytest
 
-from gqaoa.cli import run_benchmark_gd, run_benchmark_scipy, run_bracket, run_stability_check
+from gqaoa.cli import run_benchmark_gd, run_benchmark_scipy, run_stability_check
 from gqaoa.cli._common import add_problem_id_arg, apply_problem_id
 from gqaoa.config import BEST_KNOWN_CONFIG
 from gqaoa.problem import store
@@ -101,22 +101,6 @@ def test_benchmark_gd_cli_threads_problem_id_into_run_stability(monkeypatch):
     monkeypatch.setattr(run_benchmark_gd, "run_stability", fake_run_stability)
 
     run_benchmark_gd.main(["--n-runs", "1", "--problem-id", instance.problem_id])
-
-    assert captured["base_config"].problem.problem_id == instance.problem_id
-    assert captured["base_config"].problem.edges_hc == list(instance.edges_hc)
-
-
-def test_bracket_cli_threads_problem_id_into_run_bracket(monkeypatch):
-    instance = _persist_synthetic_problem(n_assets=5, seed=6)
-    captured = {}
-
-    def fake_run_bracket(**kwargs):
-        captured.update(kwargs)
-        return []
-
-    monkeypatch.setattr(run_bracket, "run_bracket", fake_run_bracket)
-
-    run_bracket.main(["--device-name", "default.qubit", "--problem-id", instance.problem_id])
 
     assert captured["base_config"].problem.problem_id == instance.problem_id
     assert captured["base_config"].problem.edges_hc == list(instance.edges_hc)

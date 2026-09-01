@@ -5,7 +5,6 @@ to be copy-pasted across bracket.py, stability_bracket.py, stability_check.py,
 benchmark_gd.py, hpo.py and the __main__ blocks of gqaoa.py / the classical
 baselines.
 """
-import dataclasses
 from dataclasses import dataclass, field
 
 RING_TOPOLOGY_EDGES = [
@@ -49,8 +48,6 @@ class TrainingConfig:
     lr_T0: int = 20
     lr_T_mult: int = 2
     beta_temp: float = 1.0
-    beta_temp_max: float | None = None
-    beta_temp_anneal_frac: float = 1.0
     init_scale: float = 1.0
     shots_probs_result: int = 1000
 
@@ -71,8 +68,7 @@ def _best_known_model() -> ModelConfig:
 def _best_known_training() -> TrainingConfig:
     return TrainingConfig(
         depth=5, limit_epochs=9999, limit_qpu_call=1000,
-        optimizer_lr=3.86e-4, beta_temp=0.7817,
-        beta_temp_max=4.0, beta_temp_anneal_frac=0.8, init_scale=0.1,
+        optimizer_lr=3.86e-4, beta_temp=0.7817, init_scale=0.1,
     )
 
 
@@ -85,21 +81,3 @@ class BestKnownConfig:
 
 
 BEST_KNOWN_CONFIG = BestKnownConfig()
-
-
-def replace_training(config: BestKnownConfig, **kwargs) -> BestKnownConfig:
-    """Return a copy of config with training fields overridden.
-
-    Useful for callers (e.g. bracket phases) that need the best-known
-    problem/model but a different limit_qpu_call/lr_T0/etc per call.
-    """
-    return dataclasses.replace(
-        config, training=dataclasses.replace(config.training, **kwargs)
-    )
-
-
-# Ablation config: identical to BEST_KNOWN_CONFIG except beta_temp_max=None, which
-# disables cosine annealing in gqaoa_strategy.run_job() (beta_temp_current stays
-# constant at training.beta_temp for every epoch). Used by
-# `gqaoa-stability-check --no-annealing` to measure annealing's contribution.
-NO_ANNEAL_CONFIG: BestKnownConfig = replace_training(BEST_KNOWN_CONFIG, beta_temp_max=None)

@@ -18,9 +18,9 @@ class OptimizerStrategy(Protocol):
     """Common shape shared by gqaoa_strategy, gradient_descent_strategy and scipy_strategy.
 
     checkpoint_in/checkpoint_out are part of the interface for all three so that
-    experiments/bracket.py and experiments/stability.py can call any strategy
-    uniformly through a registry, even though the classical strategies (no
-    neural net) simply no-op them.
+    experiments/stability.py can call any strategy uniformly through a
+    registry, even though the classical strategies (no neural net) simply
+    no-op them.
     """
 
     def run_job(
