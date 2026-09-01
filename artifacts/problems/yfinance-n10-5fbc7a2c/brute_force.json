@@ -1,0 +1,13 @@
+{
+  "B": 5.0,
+  "created_at": "2026-09-01T00:07:48.329552+00:00",
+  "lamb": 0.0,
+  "n_candidates_evaluated": 252,
+  "optimal_bitstring": "1010101010",
+  "optimal_energy": -0.27589785625016644,
+  "problem_id": "yfinance-n10-5fbc7a2c",
+  "q": 0.3,
+  "runtime_seconds": 0.009670121013186872,
+  "schema_version": 1,
+  "search_mode": "fixed-cardinality"
+}

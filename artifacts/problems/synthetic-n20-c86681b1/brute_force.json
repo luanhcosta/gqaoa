@@ -1,0 +1,13 @@
+{
+  "B": 5.0,
+  "created_at": "2026-09-01T00:07:38.506817+00:00",
+  "lamb": 0.0,
+  "n_candidates_evaluated": 15504,
+  "optimal_bitstring": "01111000000000000001",
+  "optimal_energy": -0.8709437063487557,
+  "problem_id": "synthetic-n20-c86681b1",
+  "q": 0.3,
+  "runtime_seconds": 0.8045182280038716,
+  "schema_version": 1,
+  "search_mode": "fixed-cardinality"
+}
