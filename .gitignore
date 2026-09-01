@@ -9,6 +9,10 @@ dist/
 .ruff_cache/
 .DS_Store
 
-# run artifacts — never committed, recreated on first run
-artifacts/
+# run artifacts — never committed, recreated on first run, EXCEPT persisted
+# problem definitions (artifacts/problems/), which are checked in so a fresh
+# clone has the default/legacy problem (and any brute-force ground truth)
+# available without needing to regenerate it.
+artifacts/*
+!artifacts/problems/
 mlruns/
