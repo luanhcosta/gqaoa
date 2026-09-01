@@ -133,111 +133,15 @@ depth                  = 5
 src/gqaoa/
 ├── config.py       # RING_TOPOLOGY_EDGES, ProblemConfig/ModelConfig/TrainingConfig, BEST_KNOWN_CONFIG
 ├── paths.py        # artifacts/ (mlflow.db, optuna.db, checkpoints/, problems/) resolution
-├── domain/         # pure quantum logic: QAOA Hamiltonian, data, SDP compression, injectable device
-├── problem/        # ProblemInstance generation (synthetic/yfinance/legacy) + persistence
+├── domain/         # pure quantum logic: QAOA Hamiltonian, data, SDP compression, brute-force search, injectable device
+├── problem/        # ProblemInstance generation (synthetic/yfinance/legacy) + persistence, incl. brute-force results
 ├── models/         # GPT2_QAOA model + epoch_train training loop
 ├── strategies/      # the 3 optimizer strategies behind a common run_job() interface
 ├── experiments/     # bracket (warm-restart), stability (repeated-run stats), hpo
 ├── tracking/        # MLflow init helper
-├── reporting/        # report_stats()
-└── cli/             # thin argparse entry points, one per experiment below
+├── reporting/        # report_stats(), optimality comparison against a persisted brute-force result
+└── cli/             # thin argparse entry points, one per experiment below (incl. gqaoa-brute-force)
 ```
-
----
-
-## Generating problem instances (`gqaoa.problem`)
-
-The fixed 10-asset problem (`domain/data.py::f_return_cov` + `RING_TOPOLOGY_EDGES`) that
-every strategy/CLI above uses by default is one specific instance of a more general
-portfolio problem: N assets, an expected-return vector, a covariance matrix, and a
-QAOA edge topology. `gqaoa.problem` generates and persists that more general
-`ProblemInstance` — from synthetic data, from real tickers via yfinance, or wrapping the
-existing fixed problem — independently of the strategies/CLIs (this module doesn't feed
-into `build_problem()` yet; that wiring is separate follow-up work).
-
-A `ProblemInstance` (`gqaoa.problem.ProblemInstance`) always carries: `problem_id`,
-`n_assets`, `asset_names`, `expected_value`, `cov_matrix` (a `pandas.DataFrame`, same
-shape `f_return_cov()` has always produced), `edges_hc`/`edges_hb` (QAOA cost/mixer
-graph edges), `source`, `provenance` (exactly how it was generated), `created_at`, and
-`schema_version`.
-
-### Generating synthetic data
-
-`generate_synthetic_problem` fabricates a problem for any number of assets `N`: it
-builds a random PSD target covariance, simulates a correlated daily log-return random
-walk from it over `n_trading_days` (default 756, ~3 trading years), then derives
-`expected_value`/`cov_matrix` from that simulated series (annualized ×252).
-
-```python
-from gqaoa.problem import generate_synthetic_problem
-
-instance = generate_synthetic_problem(n_assets=20, seed=42)          # ring topology (default)
-instance = generate_synthetic_problem(n_assets=20, seed=42, topology="complete")
-```
-
-- `seed`: fixes every random draw — the same seed always reproduces the exact same
-  instance (values, edges, `problem_id`). Omit it and one is drawn for you, but it's
-  still recorded in `instance.provenance["seed"]` so the run stays reproducible.
-- `n_trading_days` / `topology` (`"ring"` or `"complete"`) are also overridable; see
-  `generate_synthetic_problem`'s signature in `src/gqaoa/problem/synthetic.py`.
-
-### Generating data from a list of assets (yfinance)
-
-`generate_yfinance_problem` downloads real adjusted-close prices for a list of tickers
-and derives `expected_value`/`cov_matrix` from their historical daily log-returns
-(same ×252 annualization convention as the synthetic generator). It needs the optional
-`yfinance` extra:
-
-```bash
-pip install -e ".[yfinance]"
-```
-
-```python
-from gqaoa.problem import generate_yfinance_problem
-
-instance = generate_yfinance_problem(
-    tickers=["AAPL", "MSFT", "GOOGL", "AMZN"],
-    start_date="2022-01-01",
-    end_date="2025-01-01",
-)                                   # ring topology by default; pass topology="complete" too
-```
-
-`asset_names` preserves the order of `tickers` as given. If any ticker returns no usable
-data for the requested range, it raises `YFinanceDataError` naming the offending
-ticker(s) instead of silently proceeding with incomplete data.
-
-### The legacy fixed problem, as a `ProblemInstance`
-
-`legacy_problem_instance()` wraps the existing `f_return_cov()` + `RING_TOPOLOGY_EDGES`
-as a `ProblemInstance` (`problem_id="legacy-n10-fixed"`, `source="legacy_fixed"`) —
-purely additive, it doesn't change `data.py`/`config.py` or how `build_problem()` uses
-them today:
-
-```python
-from gqaoa.problem import legacy_problem_instance
-
-instance = legacy_problem_instance()
-```
-
-### Persisting problem instances
-
-`save_problem`/`load_problem` round-trip a `ProblemInstance` to/from
-`artifacts/problems/<problem_id>/problem.json`:
-
-```python
-from gqaoa.problem import save_problem, load_problem
-
-path = save_problem(instance)              # no-op if identical content is already there;
-                                            # raises if a *different* instance already
-                                            # exists under the same problem_id (pass
-                                            # overwrite=True to replace it deliberately)
-same_instance = load_problem(instance.problem_id)
-```
-
-`problem_id` is derived deterministically from the generation parameters (not the
-resulting numeric data), so re-running a generator with the same inputs (e.g. same
-`seed`, or same tickers/date range) always resolves to the same saved file instead of
-creating a duplicate.
 
 ---
 
@@ -320,11 +224,141 @@ entirely when it isn't needed.
 
 ---
 
+## Problem generation
+
+Every experiment CLI defaults to the same fixed 10-asset portfolio problem
+(`domain/data.py::f_return_cov` + `RING_TOPOLOGY_EDGES`) — that behavior is unchanged. That fixed
+problem is one specific instance of a more general portfolio problem: N assets, an expected-return
+vector, a covariance matrix, and a QAOA edge topology. `gqaoa.problem` generates and persists that
+more general `ProblemInstance`, which any experiment CLI can then run against instead via
+`--problem-id` (see "Reusing a `problem_id` across experiments" below).
+
+A `ProblemInstance` (`gqaoa.problem.ProblemInstance`) always carries: `problem_id`, `n_assets`,
+`asset_names`, `expected_value`, `cov_matrix` (a `pandas.DataFrame`, same shape `f_return_cov()` has
+always produced), `edges_hc`/`edges_hb` (QAOA cost/mixer graph edges), `source`, `provenance`
+(exactly how it was generated), `created_at`, and `schema_version`.
+
+### Three ways to obtain a problem
+
+- **(a) The legacy fixed problem** — the same 10-asset problem every CLI uses by default
+  (`domain/data.py::f_return_cov()` + `RING_TOPOLOGY_EDGES`), unchanged. It's also available as a
+  `ProblemInstance` via `gqaoa.problem.legacy_problem_instance()`
+  (`problem_id="legacy-n10-fixed"`, `source="legacy_fixed"`):
+
+  ```python
+  from gqaoa.problem import legacy_problem_instance
+
+  instance = legacy_problem_instance()
+  ```
+
+- **(b) Synthetic generation** — `generate_synthetic_problem(n_assets, seed=None,
+  n_trading_days=756, topology="ring")` fabricates a problem for any number of assets `N`: it builds
+  a random PSD target covariance, simulates a correlated daily log-return random walk from it over
+  `n_trading_days` (~3 trading years by default), then derives `expected_value`/`cov_matrix` from
+  that simulated series (annualized ×252).
+
+  ```python
+  from gqaoa.problem import generate_synthetic_problem
+
+  instance = generate_synthetic_problem(n_assets=20, seed=42)          # ring topology (default)
+  instance = generate_synthetic_problem(n_assets=20, seed=42, topology="complete")
+  ```
+
+  `seed` fixes every random draw — the same seed always reproduces the exact same instance (values,
+  edges, `problem_id`). Omit it and one is drawn for you, but it's still recorded in
+  `instance.provenance["seed"]` so the run stays reproducible.
+
+- **(c) Real data via yfinance** — `generate_yfinance_problem(tickers, start_date, end_date,
+  topology="ring")` downloads real adjusted-close prices for a list of tickers and derives
+  `expected_value`/`cov_matrix` from their historical daily log-returns (same ×252 annualization
+  convention as the synthetic generator). It needs the optional `yfinance` extra:
+
+  ```bash
+  pip install -e ".[yfinance]"
+  ```
+
+  ```python
+  from gqaoa.problem import generate_yfinance_problem
+
+  instance = generate_yfinance_problem(
+      tickers=["AAPL", "MSFT", "GOOGL", "AMZN"],
+      start_date="2022-01-01",
+      end_date="2025-01-01",
+  )                                   # ring topology by default; pass topology="complete" too
+  ```
+
+  `asset_names` preserves the order of `tickers` as given. If any ticker returns no usable data for
+  the requested range, it raises `YFinanceDataError` naming the offending ticker(s) instead of
+  silently proceeding with incomplete data.
+
+### Persistence layout
+
+Both `save_problem`/`load_problem` (`gqaoa.problem`) and the brute-force CLI below persist under a
+shared `artifacts/problems/<problem_id>/` directory:
+
+- `problem.json` — the `ProblemInstance` itself (written by `save_problem`).
+- `brute_force.json` — the optimal bitstring/energy for that problem at a given `(q, B, lamb,
+  search_mode)`, when it has been computed (written by `gqaoa-brute-force`, see below).
+
+```python
+from gqaoa.problem import save_problem, load_problem
+
+path = save_problem(instance)              # artifacts/problems/<problem_id>/problem.json
+same_instance = load_problem(instance.problem_id)
+```
+
+**`problem_id` scheme:** `<source>-n<N>-<hash8>` (e.g. `synthetic-n20-a1b2c3d4`), where `<hash8>` is
+the first 8 hex characters of the SHA-256 digest of the canonical (sorted-key) JSON representation
+of the *generation parameters* — never the resulting numeric data (`gqaoa.problem.identifiers`). So
+re-running a generator with the same inputs (same `seed`, or same tickers/date range) always
+resolves to the same `problem_id`/file instead of creating a duplicate.
+
+**Overwrite policy:** saving is idempotent — if `artifacts/problems/<problem_id>/problem.json` (or
+`brute_force.json`) already exists with identical content, saving is a no-op. If it exists with
+*different* content, saving raises (`FileExistsError`) unless `overwrite=True` (`save_problem(...,
+overwrite=True)`) — or, from any CLI below, `--overwrite`.
+
+### Reusing a `problem_id` across experiments
+
+Every experiment CLI (`gqaoa-run`, `gqaoa-stability-check`, `gqaoa-bracket`,
+`gqaoa-stability-bracket`, `gqaoa-benchmark-gd`, `gqaoa-benchmark-scipy`) accepts `--problem-id <id>`
+to swap in a persisted problem instead of the fixed 10-asset problem. Without it, behavior is
+exactly as it is today (fixed problem, zero regression) — see "Experiments" below for what changes
+once you do pass it.
+
+End-to-end example — generate and persist a synthetic problem, brute-force its optimum, then run an
+experiment against it:
+
+```bash
+# 1. Generate + persist a small synthetic problem, and solve it exactly on CPU.
+gqaoa-brute-force --n-assets 8 --seed 42 --search-mode fixed-cardinality --B 3
+# prints, among other fields: problem_id: synthetic-n8-<hash8>
+
+# 2. Point any experiment CLI at that problem_id instead of the fixed 10-asset problem.
+gqaoa-stability-check --problem-id synthetic-n8-<hash8> --n-runs 5 \
+    --device-name default.qubit --n-layer 1 --vocab-size 4 --limit-qpu-call 50
+```
+
+Because step 1 already persisted `brute_force.json` for that `problem_id`, step 2's report now
+includes the optimality comparison described in "Experiments" below.
+
+---
+
 ## Experiments
 
 Each experiment below is a thin CLI (`src/gqaoa/cli/`) built on top of
 `src/gqaoa/experiments/`, combining or repeating the strategies above to
 answer a different question.
+
+Items 1 and 3–7 (all but HPO) accept `--problem-id <id>` to run against a problem persisted via
+`gqaoa.problem`/`gqaoa-brute-force` (see "Problem generation" above) instead of the fixed 10-asset
+problem. **Without `--problem-id`, behavior is exactly what it is today — zero regression.** When
+`--problem-id` is given *and* a `brute_force.json` has been persisted for it, the run's report grows
+an "Optimality comparison" block (`gqaoa.reporting.optimality`): the energy gap against the known
+optimum, whether that optimum was actually reached (within a `1e-6` numerical tolerance), and how the
+found bitstring compares to the optimal one. For the multi-run experiments (item 3, item 5 with
+`--n-repetitions` > 1, items 6–7) this also includes the mode of the bitstrings found across runs and
+its count, plus the fraction of runs that reached the optimum.
 
 ### 1. GQAOA dev-run (single training run)
 
@@ -456,6 +490,42 @@ through, since it's specific to the scipy strategy and isn't a `TrainingConfig` 
 strategy-specific CLI flag (for a new strategy, or a new scipy option) can reuse the same
 mechanism instead of growing `TrainingConfig`.
 
+### 8. Brute-force ground-state search (`gqaoa-brute-force`)
+
+Exhaustively evaluates the classical QAOA cost-Hamiltonian energy (`domain/brute_force.py`) over
+candidate bitstrings and returns the true minimizer — a validation utility to check what any of the
+strategies above *should* be finding, not a strategy itself. Runs on pure CPU: no MLflow, PennyLane,
+torch, or GPU dependency at all. Two search modes:
+
+- `full` — enumerates all `2**n_assets` bitstrings.
+- `fixed-cardinality` (default) — restricts the search to bitstrings with exactly `B` bits set to
+  `1` (`itertools.combinations(range(n_assets), B)`), matching the cardinality-constraint semantics
+  of `ProblemConfig.B`.
+
+The problem can be obtained the same three ways as "Problem generation" above — loaded by
+`--problem-id`, or generated inline (synthetic or yfinance-backed), in which case it's persisted via
+`save_problem` first so it's available for later `--problem-id` reuse:
+
+```bash
+# Generate a synthetic problem inline and solve it under the cardinality constraint.
+gqaoa-brute-force --n-assets 12 --seed 7 --search-mode fixed-cardinality --B 4
+
+# Solve a problem already persisted (e.g. from a previous run above), full search.
+gqaoa-brute-force --problem-id synthetic-n12-<hash8> --search-mode full
+
+# Generate a yfinance-backed problem inline.
+gqaoa-brute-force --tickers AAPL,MSFT,GOOGL,AMZN --start-date 2022-01-01 --end-date 2025-01-01
+```
+
+`--problem-id`, `--n-assets` (synthetic), and `--tickers` (yfinance) are mutually exclusive — pick
+exactly one way to obtain the problem per invocation. `--q`/`--B`/`--lamb` default to
+`BEST_KNOWN_CONFIG.problem`'s fixed values (`q=0.3, B=5, lamb=0`); `--topology` (`ring`/`complete`)
+applies only to an inline-generated problem. The result is persisted to
+`artifacts/problems/<problem_id>/brute_force.json` (`gqaoa.problem.brute_force_store`), keyed by
+`(problem_id, q, B, lamb, search_mode)` — pass `--overwrite` to replace a previously saved result
+that differs. Once persisted, any experiment CLI's `--problem-id` picks it up automatically for the
+optimality comparison described above.
+
 ---
 
 ## Tests
@@ -485,13 +555,17 @@ without needing a GPU.
 | `src/gqaoa/models/training.py` | `epoch_train()` — one training epoch |
 | `src/gqaoa/domain/qaoa.py` | QAOA circuit definition, QPU call counter |
 | `src/gqaoa/domain/data.py` | Expected returns + covariance matrix for the 10-asset problem |
-| `src/gqaoa/problem/` | `ProblemInstance` generation (synthetic/yfinance/legacy) + persistence — see "Generating problem instances" above |
+| `src/gqaoa/problem/` | `ProblemInstance` generation (synthetic/yfinance/legacy) + persistence, incl. brute-force results — see "Problem generation" above |
+| `src/gqaoa/domain/brute_force.py` | Classical cost-Hamiltonian energy + exact/fixed-cardinality search — see item 8 above |
+| `src/gqaoa/reporting/optimality.py` | Compares a run's result against a persisted brute-force optimum — see "Experiments" above |
+| `src/gqaoa/cli/run_brute_force.py` | `gqaoa-brute-force` CLI — see item 8 above |
 | `src/gqaoa/domain/compression.py` | SDP compression for the problem graph (skip via `--no-sdp`, see "SDP compression preprocessing" above) |
 | `src/gqaoa/experiments/bracket.py` | Unified bracket strategy (single run or repeated) |
 | `src/gqaoa/experiments/stability.py` | Unified repeated-run stability analysis (any strategy) |
 | `src/gqaoa/experiments/hpo.py` | Optuna HPO search |
 | `artifacts/mlflow.db`, `artifacts/optuna.db` | Tracking databases (gitignored, created on first run) |
 | `artifacts/checkpoints/` | Model checkpoints for bracket warm restarts (gitignored) |
+| `artifacts/problems/` | Persisted `ProblemInstance`s + brute-force results (gitignored) — see "Problem generation" above |
 
 ## Key parameters (`TrainingConfig`, `src/gqaoa/config.py`)
 
@@ -504,3 +578,9 @@ without needing a GPU.
 | `init_scale` | Multiplier on initial model weights (`1.0` = PyTorch default, `0.1` = near-uniform sampling) |
 | `lr_T0` | Cosine warm restart period in epochs |
 | `lr_T_mult` | Period multiplier after each restart |
+
+## Key parameters (`ProblemConfig`, `src/gqaoa/config.py`)
+
+| Parameter | Description |
+|---|---|
+| `problem_id` | Optional id of a persisted `ProblemInstance` (see "Problem generation" above). `None` (default) keeps the fixed 10-asset `f_return_cov()` problem — every CLI's `--problem-id` flag sets this. |
