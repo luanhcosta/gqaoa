@@ -26,7 +26,7 @@ class ProblemInstance:
     cov_matrix: pd.DataFrame
     edges_hc: list[tuple[int, int]]
     edges_hb: list[tuple[int, int]]
-    source: Literal["synthetic", "yfinance", "legacy_fixed"]
+    source: Literal["synthetic", "yfinance", "default_fixed"]
     provenance: dict
     created_at: str
     schema_version: int = SCHEMA_VERSION

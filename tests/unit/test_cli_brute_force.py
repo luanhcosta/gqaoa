@@ -3,16 +3,8 @@ import json
 import pytest
 
 from gqaoa.cli import run_brute_force
-from gqaoa.problem import brute_force_store, store
+from gqaoa.problem import store
 from gqaoa.problem.synthetic import generate_synthetic_problem
-
-
-@pytest.fixture(autouse=True)
-def _isolated_problems_dir(tmp_path, monkeypatch):
-    problems_dir = tmp_path / "problems"
-    monkeypatch.setattr(store, "PROBLEMS_DIR", problems_dir)
-    monkeypatch.setattr(brute_force_store, "PROBLEMS_DIR", problems_dir)
-    yield problems_dir
 
 
 def test_cli_generates_and_persists_synthetic_problem_then_runs_brute_force(_isolated_problems_dir, capsys):

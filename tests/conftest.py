@@ -25,6 +25,22 @@ def _isolated_mlflow_tracking(tmp_path, monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _isolated_problems_dir(tmp_path, monkeypatch):
+    # BEST_KNOWN_CONFIG (and every CLI's default config) now carries
+    # problem_id=DEFAULT_PROBLEM_ID, so build_problem() touches
+    # gqaoa.problem.store on every default run — bootstrapping
+    # artifacts/problems/default-n10-fixed/problem.json on first use. Point
+    # both problem-store modules at a throwaway per-test directory so test
+    # runs don't write into the real (committed) artifacts/problems/.
+    from gqaoa.problem import brute_force_store, store
+
+    problems_dir = tmp_path / "problems"
+    monkeypatch.setattr(store, "PROBLEMS_DIR", problems_dir)
+    monkeypatch.setattr(brute_force_store, "PROBLEMS_DIR", problems_dir)
+    yield problems_dir
+
+
 @pytest.fixture
 def device_name():
     return "default.qubit"

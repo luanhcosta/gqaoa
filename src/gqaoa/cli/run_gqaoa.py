@@ -2,7 +2,14 @@
 import argparse
 
 from gqaoa.cli._common import add_problem_id_arg, apply_problem_id
-from gqaoa.config import BestKnownConfig, ModelConfig, ProblemConfig, RING_TOPOLOGY_EDGES, TrainingConfig
+from gqaoa.config import (
+    DEFAULT_PROBLEM_ID,
+    BestKnownConfig,
+    ModelConfig,
+    ProblemConfig,
+    RING_TOPOLOGY_EDGES,
+    TrainingConfig,
+)
 from gqaoa.reporting.optimality import compare_single_run_to_optimal, try_load_brute_force
 from gqaoa.strategies import gqaoa_strategy
 from gqaoa.tracking.mlflow_utils import init_mlflow
@@ -35,6 +42,7 @@ def main(argv=None) -> None:
         initial_state="dicke_state", mixture_layer="xy",
         edges_hc=RING_TOPOLOGY_EDGES, edges_hb=RING_TOPOLOGY_EDGES,
         sdp=not args.no_sdp,
+        problem_id=DEFAULT_PROBLEM_ID,
     )
     model = ModelConfig(vocab_size=args.vocab_size, n_layer=args.n_layer)
     training = TrainingConfig(

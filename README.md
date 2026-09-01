@@ -135,7 +135,7 @@ src/gqaoa/
 ├── config.py       # RING_TOPOLOGY_EDGES, ProblemConfig/ModelConfig/TrainingConfig, BEST_KNOWN_CONFIG
 ├── paths.py        # artifacts/ (mlflow.db, optuna.db, checkpoints/, problems/) resolution
 ├── domain/         # pure quantum logic: QAOA Hamiltonian, data, SDP compression, brute-force search, injectable device
-├── problem/        # ProblemInstance generation (synthetic/yfinance/legacy) + persistence, incl. brute-force results
+├── problem/        # ProblemInstance generation (synthetic/yfinance/default) + persistence, incl. brute-force results
 ├── models/         # GPT2_QAOA model + epoch_train training loop
 ├── strategies/      # the 3 optimizer strategies behind a common run_job() interface
 ├── experiments/     # stability (repeated-run stats), hpo
@@ -227,11 +227,16 @@ entirely when it isn't needed.
 ## Problem generation
 
 Every experiment CLI defaults to the same fixed 10-asset portfolio problem
-(`domain/data.py::f_return_cov` + `RING_TOPOLOGY_EDGES`) — that behavior is unchanged. That fixed
-problem is one specific instance of a more general portfolio problem: N assets, an expected-return
-vector, a covariance matrix, and a QAOA edge topology. `gqaoa.problem` generates and persists that
-more general `ProblemInstance`, which any experiment CLI can then run against instead via
-`--problem-id` (see "Reusing a `problem_id` across experiments" below).
+(`domain/data.py::f_return_cov` + `RING_TOPOLOGY_EDGES`, assets AAPL, MSFT, NVDA, AMD, JNJ, LLY, UNH,
+JPM, BAC, GS) — same numbers as always, but served as a persisted `ProblemInstance`
+(`problem_id="default-n10-fixed"`) rather than a hardcoded literal: `ProblemConfig.problem_id`
+defaults to `DEFAULT_PROBLEM_ID`, and `build_problem()` loads it via
+`gqaoa.problem.default.ensure_default_problem_persisted()`, which bootstraps
+`artifacts/problems/default-n10-fixed/problem.json` on first use and just loads it on every call after
+that. That fixed problem is one specific instance of a more general portfolio problem: N assets, an
+expected-return vector, a covariance matrix, and a QAOA edge topology. `gqaoa.problem` generates and
+persists that more general `ProblemInstance`, which any experiment CLI can then run against instead
+via `--problem-id` (see "Reusing a `problem_id` across experiments" below).
 
 A `ProblemInstance` (`gqaoa.problem.ProblemInstance`) always carries: `problem_id`, `n_assets`,
 `asset_names`, `expected_value`, `cov_matrix` (a `pandas.DataFrame`, same shape `f_return_cov()` has
@@ -240,15 +245,16 @@ always produced), `edges_hc`/`edges_hb` (QAOA cost/mixer graph edges), `source`,
 
 ### Three ways to obtain a problem
 
-- **(a) The legacy fixed problem** — the same 10-asset problem every CLI uses by default
-  (`domain/data.py::f_return_cov()` + `RING_TOPOLOGY_EDGES`), unchanged. It's also available as a
-  `ProblemInstance` via `gqaoa.problem.legacy_problem_instance()`
-  (`problem_id="legacy-n10-fixed"`, `source="legacy_fixed"`):
+- **(a) The default fixed problem** — the same 10-asset problem every CLI uses by default
+  (`domain/data.py::f_return_cov()` + `RING_TOPOLOGY_EDGES`), unchanged, and how every CLI's default
+  config actually reaches it (`problem_id="default-n10-fixed"`, `source="default_fixed"`,
+  `asset_names=["AAPL", "MSFT", "NVDA", "AMD", "JNJ", "LLY", "UNH", "JPM", "BAC", "GS"]`):
 
   ```python
-  from gqaoa.problem import legacy_problem_instance
+  from gqaoa.problem import default_problem_instance, ensure_default_problem_persisted
 
-  instance = legacy_problem_instance()
+  instance = default_problem_instance()          # builds it fresh in memory, doesn't touch disk
+  instance = ensure_default_problem_persisted()  # loads artifacts/problems/default-n10-fixed/, bootstrapping it on first call
   ```
 
 - **(b) Synthetic generation** — `generate_synthetic_problem(n_assets, seed=None,
@@ -321,10 +327,9 @@ overwrite=True)`) — or, from any CLI below, `--overwrite`.
 ### Reusing a `problem_id` across experiments
 
 Every experiment CLI (`gqaoa-run`, `gqaoa-stability-check`, `gqaoa-benchmark-gd`,
-`gqaoa-benchmark-scipy`) accepts `--problem-id <id>`
-to swap in a persisted problem instead of the fixed 10-asset problem. Without it, behavior is
-exactly as it is today (fixed problem, zero regression) — see "Experiments" below for what changes
-once you do pass it.
+`gqaoa-benchmark-scipy`) accepts `--problem-id <id>` to swap in a persisted problem instead of the
+default `default-n10-fixed` one. Without it, behavior is exactly as it is today (same fixed 10-asset
+problem, zero regression) — see "Experiments" below for what changes once you do pass it.
 
 End-to-end example — generate and persist a synthetic problem, brute-force its optimum, then run an
 experiment against it:
@@ -508,8 +513,9 @@ without needing a GPU.
 | `src/gqaoa/models/gpt_qaoa.py` | GPT2-based QAOA parameter sampler |
 | `src/gqaoa/models/training.py` | `epoch_train()` — one training epoch |
 | `src/gqaoa/domain/qaoa.py` | QAOA circuit definition, QPU call counter |
-| `src/gqaoa/domain/data.py` | Expected returns + covariance matrix for the 10-asset problem |
-| `src/gqaoa/problem/` | `ProblemInstance` generation (synthetic/yfinance/legacy) + persistence, incl. brute-force results — see "Problem generation" above |
+| `src/gqaoa/domain/data.py` | Expected returns + covariance matrix for the 10-asset problem (the raw numbers `gqaoa.problem.default` wraps) |
+| `src/gqaoa/problem/` | `ProblemInstance` generation (synthetic/yfinance/default) + persistence, incl. brute-force results — see "Problem generation" above |
+| `src/gqaoa/problem/default.py` | Wraps `domain/data.py::f_return_cov()` as the default persisted `ProblemInstance` (`DEFAULT_PROBLEM_ID`); `ensure_default_problem_persisted()` is what `build_problem()` calls by default |
 | `src/gqaoa/domain/brute_force.py` | Classical cost-Hamiltonian energy + exact/fixed-cardinality search — see item 6 above |
 | `src/gqaoa/reporting/optimality.py` | Compares a run's result against a persisted brute-force optimum — see "Experiments" above |
 | `src/gqaoa/cli/run_brute_force.py` | `gqaoa-brute-force` CLI — see item 6 above |
@@ -518,7 +524,7 @@ without needing a GPU.
 | `src/gqaoa/experiments/hpo.py` | Optuna HPO search |
 | `artifacts/mlflow.db`, `artifacts/optuna.db` | Tracking databases (gitignored, created on first run) |
 | `artifacts/checkpoints/` | Model checkpoints via `checkpoint_in`/`checkpoint_out` (gitignored, currently unused by any experiment) |
-| `artifacts/problems/` | Persisted `ProblemInstance`s + brute-force results (gitignored) — see "Problem generation" above |
+| `artifacts/problems/` | Persisted `ProblemInstance`s + brute-force results — the one part of `artifacts/` that's tracked in git, not gitignored — see "Problem generation" above |
 
 ## Key parameters (`TrainingConfig`, `src/gqaoa/config.py`)
 
@@ -534,4 +540,4 @@ without needing a GPU.
 
 | Parameter | Description |
 |---|---|
-| `problem_id` | Optional id of a persisted `ProblemInstance` (see "Problem generation" above). `None` (default) keeps the fixed 10-asset `f_return_cov()` problem — every CLI's `--problem-id` flag sets this. |
+| `problem_id` | Id of a persisted `ProblemInstance` (see "Problem generation" above). Defaults to `DEFAULT_PROBLEM_ID` ("default-n10-fixed") in `BEST_KNOWN_CONFIG` and every CLI — the same 10-asset `f_return_cov()` problem as always, just served via `gqaoa.problem`. Bare `ProblemConfig()` leaves this `None` instead (calls `f_return_cov()` directly, no `gqaoa.problem` involvement) — used by tests, not by any CLI. Every CLI's `--problem-id` flag overrides it. |

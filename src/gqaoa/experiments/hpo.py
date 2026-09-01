@@ -11,7 +11,7 @@ import logging
 import mlflow
 import optuna
 
-from gqaoa.config import ModelConfig, ProblemConfig, RING_TOPOLOGY_EDGES, TrainingConfig
+from gqaoa.config import DEFAULT_PROBLEM_ID, ModelConfig, ProblemConfig, RING_TOPOLOGY_EDGES, TrainingConfig
 from gqaoa.paths import ARTIFACTS_DIR, MLFLOW_TRACKING_URI, OPTUNA_STORAGE
 from gqaoa.strategies import gqaoa_strategy
 
@@ -23,6 +23,7 @@ FIXED_PROBLEM = ProblemConfig(
     initial_state="dicke_state", mixture_layer="xy",
     edges_hc=RING_TOPOLOGY_EDGES, edges_hb=RING_TOPOLOGY_EDGES,
     sdp=True,
+    problem_id=DEFAULT_PROBLEM_ID,
 )
 
 ARCH_PRESETS = {

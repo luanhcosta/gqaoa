@@ -2,16 +2,9 @@ import dataclasses
 
 import pytest
 
-from gqaoa.problem import store
-from gqaoa.problem.legacy import legacy_problem_instance
+from gqaoa.problem.default import default_problem_instance
 from gqaoa.problem.store import load_problem, save_problem
 from gqaoa.problem.synthetic import generate_synthetic_problem
-
-
-@pytest.fixture(autouse=True)
-def _isolated_problems_dir(tmp_path, monkeypatch):
-    monkeypatch.setattr(store, "PROBLEMS_DIR", tmp_path / "problems")
-    yield
 
 
 def test_save_then_load_round_trip():
@@ -40,7 +33,7 @@ def test_load_problem_unknown_id_raises_clear_error():
 
 
 def test_save_problem_is_idempotent_noop_for_identical_content():
-    instance = legacy_problem_instance()
+    instance = default_problem_instance()
     path1 = save_problem(instance)
     mtime1 = path1.stat().st_mtime_ns
 
@@ -52,7 +45,7 @@ def test_save_problem_is_idempotent_noop_for_identical_content():
 
 
 def test_save_problem_rejects_conflicting_content_without_overwrite():
-    instance = legacy_problem_instance()
+    instance = default_problem_instance()
     save_problem(instance)
 
     changed = dataclasses.replace(instance, expected_value=[0.0] * instance.n_assets)
@@ -62,7 +55,7 @@ def test_save_problem_rejects_conflicting_content_without_overwrite():
 
 
 def test_save_problem_overwrite_true_replaces_content():
-    instance = legacy_problem_instance()
+    instance = default_problem_instance()
     save_problem(instance)
 
     changed = dataclasses.replace(instance, expected_value=[0.0] * instance.n_assets)

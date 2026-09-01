@@ -1,19 +1,10 @@
 import argparse
 
-import pytest
-
 from gqaoa.cli import run_benchmark_gd, run_benchmark_scipy, run_stability_check
 from gqaoa.cli._common import add_problem_id_arg, apply_problem_id
-from gqaoa.config import BEST_KNOWN_CONFIG
-from gqaoa.problem import store
+from gqaoa.config import BEST_KNOWN_CONFIG, DEFAULT_PROBLEM_ID
 from gqaoa.problem.synthetic import generate_synthetic_problem
 from gqaoa.problem.store import save_problem
-
-
-@pytest.fixture(autouse=True)
-def _isolated_problems_dir(tmp_path, monkeypatch):
-    monkeypatch.setattr(store, "PROBLEMS_DIR", tmp_path / "problems")
-    yield
 
 
 def _persist_synthetic_problem(n_assets=5, seed=1):
@@ -30,7 +21,7 @@ def test_apply_problem_id_no_flag_keeps_config_unchanged():
     config = apply_problem_id(BEST_KNOWN_CONFIG, args)
 
     assert config is BEST_KNOWN_CONFIG
-    assert config.problem.problem_id is None
+    assert config.problem.problem_id == DEFAULT_PROBLEM_ID
 
 
 def test_apply_problem_id_sets_problem_id_and_topology_from_instance():
@@ -48,7 +39,7 @@ def test_apply_problem_id_sets_problem_id_and_topology_from_instance():
     assert config.problem.q == BEST_KNOWN_CONFIG.problem.q
     assert config.problem.sdp == BEST_KNOWN_CONFIG.problem.sdp
     # original config is untouched (dataclasses.replace returns a copy)
-    assert BEST_KNOWN_CONFIG.problem.problem_id is None
+    assert BEST_KNOWN_CONFIG.problem.problem_id == DEFAULT_PROBLEM_ID
 
 
 def test_stability_check_cli_exposes_problem_id_flag():

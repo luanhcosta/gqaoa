@@ -59,8 +59,8 @@ def add_problem_id_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--problem-id", default=None,
         help="Load a persisted problem (see gqaoa.problem.store.save_problem) by its "
-             "problem_id and use it instead of the fixed 10-asset portfolio problem. "
-             "Default: unchanged (fixed problem).",
+             "problem_id and use it instead of the default fixed 10-asset portfolio "
+             "problem (problem_id=DEFAULT_PROBLEM_ID). Default: unchanged (fixed problem).",
     )
 
 

@@ -12,6 +12,13 @@ RING_TOPOLOGY_EDGES = [
     (8, 5), (5, 9), (9, 6), (6, 3), (3, 0),
 ]
 
+# problem_id of the persisted ProblemInstance wrapping RING_TOPOLOGY_EDGES +
+# f_return_cov() (see gqaoa.problem.default) — defined here, not there, because
+# gqaoa.problem.default already imports RING_TOPOLOGY_EDGES from this module,
+# and _best_known_problem() below needs this id without importing back into
+# gqaoa.problem (which would be circular).
+DEFAULT_PROBLEM_ID = "default-n10-fixed"
+
 
 @dataclass
 class ProblemConfig:
@@ -23,11 +30,13 @@ class ProblemConfig:
     edges_hc: list | None = None
     edges_hb: list | None = None
     sdp: bool = False
-    # Optional id of a persisted `gqaoa.problem.ProblemInstance` (see
-    # `gqaoa.problem.store.load_problem`). When None (default), build_problem()
-    # keeps using the fixed 10-asset f_return_cov() problem — 100% unchanged
-    # behavior. When set, build_problem() loads that instance's
-    # expected_value/cov_matrix instead.
+    # Id of a persisted `gqaoa.problem.ProblemInstance` (see
+    # `gqaoa.problem.store.load_problem`) that build_problem() loads
+    # expected_value/cov_matrix from. Bare `ProblemConfig()` leaves this None,
+    # a low-level escape hatch that makes build_problem() call f_return_cov()
+    # directly with no `gqaoa.problem` involvement — used by tests and other
+    # in-memory configs, not by any CLI. `_best_known_problem()` below (and
+    # every CLI's default config) sets this to `DEFAULT_PROBLEM_ID` instead.
     problem_id: str | None = None
 
 
@@ -58,6 +67,7 @@ def _best_known_problem() -> ProblemConfig:
         initial_state="dicke_state", mixture_layer="xy",
         edges_hc=RING_TOPOLOGY_EDGES, edges_hb=RING_TOPOLOGY_EDGES,
         sdp=True,
+        problem_id=DEFAULT_PROBLEM_ID,
     )
 
 
